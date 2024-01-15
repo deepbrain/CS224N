@@ -32,8 +32,6 @@ from sklearn.model_selection import train_test_split
 base_model_id = "microsoft/phi-2"
 
 
-def main()
-
 #Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
 #Load the model with fp16
@@ -42,8 +40,7 @@ model =  AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=T
 duration = 0.0
 total_length = 0
 prompt = []
-prompt.append("Cite 20 famous City names.")
-prompt.append("Python Program to Find the Prime Factors of a Number")
+prompt.append("INPUT: Think step by step and solve a math problem: X^2 -10x + 24 = 0. Use the discriminant method. Elaborate your solution.")
 
 for i in range(len(prompt)):
   model_inputs = tokenizer(prompt[i], return_tensors="pt").to("cuda:3")
