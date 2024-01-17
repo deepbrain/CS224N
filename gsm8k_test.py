@@ -127,7 +127,7 @@ def compute_result(input_code_string):
         return -99999
 
 if __name__ == '__main__':
-    logger.add("gsm8k_test_set_experiment1.log", rotation = "100 MB")
+    logger.add("gsm8k_test_set_e1.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     test_examples = get_examples("test")
     correct = 0
@@ -145,13 +145,14 @@ if __name__ == '__main__':
         #remove the commas from the answer:
         if answer == correct_answer:
             correct += 1
-            logger.info("---Fraction correct %.3f" % (correct/total))
+            logger.info("---Total processed: %d, fraction correct %.3f" % (total, correct / total))
         else:
+            logger.info("---Total processed: %d, fraction correct %.3f" % (total, correct / total))
             logger.info(f"Question number: {num}, Question: {qn}")
             logger.info(f"Correct answer: {correct_answer}")
             logger.info(f"Your answer: {answer}")
             logger.info(f"Solution: {solution}")
-            logger.info("Question: %s" % example["answer"])
+            logger.info("Answer: %s" % example["answer"])
     logger.info("Accuracy:", correct/total)
 
 
