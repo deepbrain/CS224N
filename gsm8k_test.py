@@ -121,24 +121,6 @@ def compute_result(input_code_string):
         logger.error(f"Code that caused the error: {input_code_string}")
         return -99999
 
-
-def solve(problem, prompt=prompt):
-    input = prompt % problem
-    model_input = tokenizer(input, return_tensors="pt").to("cuda:3")
-    start_time = time.time()
-    output = model.generate(**model_input, max_length=len(model_input[0])+200)[0]
-    duration = float(time.time() - start_time)
-    total_length = len(output)
-    tok_sec_prompt = round(len(output)/float(time.time() - start_time),3)
-    print("Prompt --- %s tokens/seconds ---" % (tok_sec_prompt))
-    solution = tokenizer.decode(output, skip_special_tokens=True)
-
-    #exclude the input string from the solution
-    solution = solution.split("INPUT: ")[3]
-    #answer should be between #### and \n (exclusive)
-    answer = solution.split("####")[1].split("\n")[0].strip()
-    return solution, answer
-
 if __name__ == '__main__':
     logger.add("gsm8k_test_set.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
@@ -158,7 +140,7 @@ if __name__ == '__main__':
         #remove the commas from the answer:
         if answer == correct_answer:
             correct += 1
-            logger.info("---Fraction correct %d/%d" % (correct, total))
+            logger.info("---Fraction correct %.3f" % (correct/total))
         else:
             logger.info(f"Question number: {num}, Question: {qn}")
             logger.info(f"Correct answer: {correct_answer}")
