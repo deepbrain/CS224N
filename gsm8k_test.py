@@ -50,15 +50,8 @@ tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
 model =  AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 3})
 
 
-
-prompt = "def simple_math_problem() -> int:\n    \"\"\"%s Your code must end with a \"return result\" line.\"\"\"\n"
-
-#          "INPUT: Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?\n"+ \
-#         "SOLUTION: Natalia sold 48/2 = <<48/2=24>>24 clips in May. Natalia sold 48+24 = <<48+24=72>>72 clips altogether in April and May. #### 72\n"+ \
-#         "INPUT: Weng earns $12 an hour for babysitting. Yesterday, she just did 50 minutes of babysitting. How much did she earn?\n"+ \
-#         "SOLUTION: Weng earns 12/60 = $<<12/60=0.2>>0.2 per minute. Working 50 minutes, she earned 0.2 x 50 = $<<0.2*50=10>>10. #### 10\n"+ \
-#         "INPUT: %s\nSOLUTION: ")
-
+function_name = "solve_math_problem"
+prompt = f"def {function_name}() -> int:\n    \"\"\"%s Your code must end with a \"return result\" line.\"\"\"\n"
 
 def sample(model, qn, tokenizer, device, sample_len):
     # Inefficient version of calculator sampling -- no batches, doesn't
@@ -105,7 +98,7 @@ def compute_result(input_code_string):
         exec(input_code_string, local_namespace)
 
         # Assuming the function name is known and consistent
-        func_name = "simple_math_problem"  # Adjust if the function name varies
+        func_name = function_name  # Adjust if the function name varies
         max_time = 3
 
         if func_name in local_namespace:
@@ -127,12 +120,16 @@ def compute_result(input_code_string):
         return -99999
 
 if __name__ == '__main__':
-    logger.add("gsm8k_test_set_e1.log", rotation = "100 MB")
+    logger.add("gsm8k_test_set_e2.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     test_examples = get_examples("test")
+    logger.info("Loaded %d test examples" % len(test_examples))
+    logger.info("Using prompt: %s" % prompt)
     correct = 0
     total = 0
     device = "cuda:3"
+    # remember the start time:
+    start_time = time.time()
     for num, example in enumerate(test_examples):
         total += 1
         qn = example["question"]
@@ -153,7 +150,10 @@ if __name__ == '__main__':
             logger.info(f"Your answer: {answer}")
             logger.info(f"Solution: {solution}")
             logger.info("Answer: %s" % example["answer"])
-    logger.info("Accuracy:", correct/total)
+    logger.info("Accuracy: %.3f %" % (100*correct/total))
+    logger.info("Total time: %.3f seconds" % (time.time() - start_time))
+    logger.info("Solutions generated per minute: %.3f" % (total / (time.time() - start_time) * 60))
+    logger.info("Used prompt: %s" % prompt)
 
 
 
