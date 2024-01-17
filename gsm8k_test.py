@@ -111,7 +111,12 @@ def compute_result(input_code_string):
         if func_name in local_namespace:
             # Call the function and return the result
             with timeout(max_time, input_code_string):
-                return local_namespace[func_name]()
+                try:
+                    return local_namespace[func_name]()
+                except Exception as e:
+                    logger.error(f"An error occurred: {e}")
+                    logger.error(f"Code that caused the error: {input_code_string}")
+                    return -99999
         else:
             # Function name not found
             return -99999
@@ -122,7 +127,7 @@ def compute_result(input_code_string):
         return -99999
 
 if __name__ == '__main__':
-    logger.add("gsm8k_test_set.log", rotation = "100 MB")
+    logger.add("gsm8k_test_set_experiment1.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     test_examples = get_examples("test")
     correct = 0
@@ -131,7 +136,7 @@ if __name__ == '__main__':
     for num, example in enumerate(test_examples):
         total += 1
         qn = example["question"]
-        solution = sample(model, prompt % qn, tokenizer, device, 200) #solve(qn)
+        solution = sample(model, prompt % qn, tokenizer, device, 500) #solve(qn)
         answer = compute_result(solution)
         try:
             correct_answer = int(example["answer"].split("####")[1].split("<|endoftext|>")[0].strip())
