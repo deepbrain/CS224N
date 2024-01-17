@@ -35,6 +35,8 @@ from sklearn.metrics import (accuracy_score,
 from sklearn.model_selection import train_test_split
 from loguru import logger
 import logging
+from contextlib import contextmanager
+import signal
 
 
 
@@ -49,7 +51,7 @@ model =  AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=T
 
 
 
-prompt = "def simple_math_problem() -> int:\n    \"\"\"%s The following code must end with a \"return result\" line.\"\"\"\n"
+prompt = "def simple_math_problem() -> int:\n    \"\"\"%s Your code must end with a \"return result\" line.\"\"\"\n"
 
 #          "INPUT: Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?\n"+ \
 #         "SOLUTION: Natalia sold 48/2 = <<48/2=24>>24 clips in May. Natalia sold 48+24 = <<48+24=72>>72 clips altogether in April and May. #### 72\n"+ \
@@ -81,6 +83,19 @@ def sample(model, qn, tokenizer, device, sample_len):
     return qn
 
 
+# taken from
+# https://stackoverflow.com/questions/492519/timeout-on-a-function-call
+@contextmanager
+def timeout(duration, program):
+    def timeout_handler(signum, frame):
+        raise Exception(f"'{program}': timed out after {duration} seconds")
+
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(duration)
+    yield
+    signal.alarm(0)
+
+
 def compute_result(input_code_string):
     try:
         # Create a new, isolated namespace for each invocation
@@ -91,10 +106,12 @@ def compute_result(input_code_string):
 
         # Assuming the function name is known and consistent
         func_name = "simple_math_problem"  # Adjust if the function name varies
+        max_time = 3
 
         if func_name in local_namespace:
             # Call the function and return the result
-            return local_namespace[func_name]()
+            with timeout(max_time, input_code_string):
+                return local_namespace[func_name]()
         else:
             # Function name not found
             return -99999
@@ -123,7 +140,7 @@ def solve(problem, prompt=prompt):
     return solution, answer
 
 if __name__ == '__main__':
-    logger.add("gsm8k_test_all.log", rotation = "100 MB")
+    logger.add("gsm8k_test_set.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     test_examples = get_examples("test")
     correct = 0
@@ -132,7 +149,6 @@ if __name__ == '__main__':
     for num, example in enumerate(test_examples):
         total += 1
         qn = example["question"]
-        print(qn.strip())
         solution = sample(model, prompt % qn, tokenizer, device, 200) #solve(qn)
         answer = compute_result(solution)
         try:
