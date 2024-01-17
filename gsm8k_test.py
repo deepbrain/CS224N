@@ -3,6 +3,7 @@ import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 
 # this code assumes that you cloned the GSM8K repo into the same directory as this repo: git clone https://github.com/openai/grade-school-math/tree/master
 from dataset import get_examples, GSMDataset
@@ -37,25 +38,39 @@ from loguru import logger
 import logging
 from contextlib import contextmanager
 import signal
-
-
+from vllm import LLM, SamplingParams
 
 
 base_model_id = "microsoft/phi-2"
-
-
 #Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
 #Load the model with fp16
-model =  AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 3})
 
+USE_VLLM = True
+
+if USE_VLLM:
+    model = LLM(model=base_model_id)
+else:
+    model = AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16,
+                                                 device_map={"": 0})
 
 function_name = "solve_math_problem"
-prompt = f"def {function_name}() -> int:\n    \"\"\"%s Your code must end with a \"return result\" line.\"\"\"\n"
+prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n    \"\"\"\n"
+#         "       End with a \"return result\" line.\n" + \
+#         "       You must elaborate your thinking in code via comments below\n"
 
-def sample(model, qn, tokenizer, device, sample_len):
+def sample(model, qn, tokenizer, device, sample_len, temperature = 0., top_p = 0.01):
     # Inefficient version of calculator sampling -- no batches, doesn't
     # cache activations from previous tokens
+    if USE_VLLM:
+        sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=len(qn) + sample_len)
+        out = model.generate(qn, sampling_params=sampling_params, use_tqdm=False)
+        output = []
+        for qn, solution in zip(qn, out):
+            output.append(qn+solution.outputs[0].text)
+        return output
+    
+
     END_OF_TEXT_TOKEN = tokenizer.eos_token_id
 
     for _ in range(sample_len):
@@ -63,9 +78,7 @@ def sample(model, qn, tokenizer, device, sample_len):
             toks = tokenizer([qn], padding=False, return_tensors="pt").to(device)
             orig_len = toks["input_ids"].shape[1]
 
-            out = model.generate(
-                **toks, max_length=orig_len + 1, pad_token_id=model.config.eos_token_id
-            )
+            out = model.generate(**toks, max_length=orig_len + 1, pad_token_id=model.config.eos_token_id, temperature=temperature, top_p=top_p,)
             text = tokenizer.batch_decode(out)[0]
             if out[0, -1].item() == END_OF_TEXT_TOKEN:
                 break
@@ -95,7 +108,7 @@ def compute_result(input_code_string):
         local_namespace = {}
 
         # Execute the code in the string within the isolated namespace
-        exec(input_code_string, local_namespace)
+        exec('import math\n' +input_code_string, local_namespace)
 
         # Assuming the function name is known and consistent
         func_name = function_name  # Adjust if the function name varies
@@ -120,39 +133,48 @@ def compute_result(input_code_string):
         return -99999
 
 if __name__ == '__main__':
-    logger.add("gsm8k_test_set_e2.log", rotation = "100 MB")
+    logger.add("gsm8k_test_set_e5.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    test_examples = get_examples("test")
-    logger.info("Loaded %d test examples" % len(test_examples))
+    examples = get_examples("test")
+    logger.info("Loaded %d examples" % len(examples))
     logger.info("Using prompt: %s" % prompt)
     correct = 0
     total = 0
-    device = "cuda:3"
+    device = "cuda:0"
     # remember the start time:
     start_time = time.time()
-    for num, example in enumerate(test_examples):
+    batch = []
+    answers = []
+    for i in range(len(examples)):
         total += 1
-        qn = example["question"]
-        solution = sample(model, prompt % qn, tokenizer, device, 500) #solve(qn)
-        answer = compute_result(solution)
-        try:
-            correct_answer = int(example["answer"].split("####")[1].split("<|endoftext|>")[0].strip())
-        except ValueError:
-            correct_answer = -88888
-        #remove the commas from the answer:
-        if answer == correct_answer:
-            correct += 1
-            logger.info("---Total processed: %d, fraction correct %.3f" % (total, correct / total))
-        else:
-            logger.info("---Total processed: %d, fraction correct %.3f" % (total, correct / total))
-            logger.info(f"Question number: {num}, Question: {qn}")
-            logger.info(f"Correct answer: {correct_answer}")
-            logger.info(f"Your answer: {answer}")
-            logger.info(f"Solution: {solution}")
-            logger.info("Answer: %s" % example["answer"])
-    logger.info("Accuracy: %.3f %" % (100*correct/total))
-    logger.info("Total time: %.3f seconds" % (time.time() - start_time))
-    logger.info("Solutions generated per minute: %.3f" % (total / (time.time() - start_time) * 60))
+        example = examples[i]
+        batch.append(prompt % example["question"])
+        answers.append(example["answer"])
+        if len(batch) == 64:
+            solutions = sample(model, batch, tokenizer, device, 500) #solve(qn)
+            j = 0
+            for qn, solution, ds_answer in zip(batch, solutions, answers):
+                answer = compute_result(solution)
+                try:
+                    correct_answer = int(ds_answer.split("####")[1].split("<|endoftext|>")[0].strip())
+                except ValueError:
+                    correct_answer = -88888
+            #remove the commas from the answer:
+                if answer == correct_answer:
+                    correct += 1
+                logger.info("Total processed: %d, percent correct: %.3f" % (total, 100.0*correct / total))
+                if answer != correct_answer:
+                    logger.info(f"Question number: {i+j}, Question: {qn}")
+                    logger.info(f"Dataset answer: {correct_answer}")
+                    logger.info("Dataset solution: %s" % solution)
+                    logger.info(f"LLM answer: {answer}")
+                    logger.info(f"LLM solution: {solution}")
+                j += 1
+            batch = []
+            answers = []
+    logger.info("Accuracy: %.3f%%" % (100*correct/total))
+    logger.info("Total time: %.1f minutes" % ((time.time() - start_time)/60))
+    logger.info("Solutions generated per minute: %.1f" % (total / (time.time() - start_time) * 60))
     logger.info("Used prompt: %s" % prompt)
 
 
