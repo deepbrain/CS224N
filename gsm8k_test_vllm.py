@@ -3,41 +3,19 @@ import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3" # adjust this to the GPU you want to use
 
 # this code assumes that you cloned the GSM8K repo into the same directory as this repo: git clone https://github.com/openai/grade-school-math/tree/master
 from dataset import get_examples, GSMDataset
-from calculator import sample as gsm_sample, use_calculator
-
-
 import warnings
 warnings.filterwarnings("ignore")
-import numpy as np
-import pandas as pd
-import os
 import time
-from tqdm import tqdm
-import bitsandbytes as bnb
 import torch
-import torch.nn as nn
-import transformers
-from datasets import Dataset
-from peft import LoraConfig, PeftConfig
-from trl import SFTTrainer
-from transformers import (AutoModelForCausalLM,
-                          AutoTokenizer,
-                          BitsAndBytesConfig,
-                          TrainingArguments,
-                          pipeline,
-                          logging)
-from sklearn.metrics import (accuracy_score,
-                             classification_report,
-                             confusion_matrix)
-from sklearn.model_selection import train_test_split
 from loguru import logger
 import logging
 from contextlib import contextmanager
 import signal
+from transformers import (AutoModelForCausalLM,  AutoTokenizer)
 
 
 base_model_id = "microsoft/phi-2"
@@ -50,17 +28,14 @@ if USE_VLLM:
     from vllm import LLM, SamplingParams
     model = LLM(model=base_model_id)
 else:
-    model = AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16,
-                                                 device_map={"": 0})
+    model = AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 0})
 
-function_name = "solve_math_problem"
+function_name = "simple_math_problem"
 prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n    \"\"\"\n"
 #         "       End with a \"return result\" line.\n" + \
 #         "       You must elaborate your thinking in code via comments below\n"
 
-def sample(model, qn, tokenizer, device, sample_len, temperature = 0., top_p = 0.001): #temps higher than 2 do not work well
-    # Inefficient version of calculator sampling -- no batches, doesn't
-    # cache activations from previous tokens
+def sample(model, qn, tokenizer, device, sample_len, temperature = 0., top_p = 0.01): #temps higher than 2 do not work well
     if USE_VLLM:
         sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=len(qn) + sample_len)
         out = model.generate(qn, sampling_params=sampling_params, use_tqdm=False)
@@ -105,10 +80,8 @@ def compute_result(input_code_string):
     try:
         # Create a new, isolated namespace for each invocation
         local_namespace = {}
-
         # Execute the code in the string within the isolated namespace
         exec('import math\n' +input_code_string, local_namespace)
-
         # Assuming the function name is known and consistent
         func_name = function_name  # Adjust if the function name varies
         max_time = 3
@@ -145,13 +118,11 @@ if __name__ == '__main__':
     answers = []
     for i in range(len(examples)):
         total += 1
-        example = examples[i]
-        batch.append(prompt % example["question"])
-        answers.append(example["answer"])
+        batch.append(prompt % examples[i]["question"])
+        answers.append(examples[i]["answer"])
         if len(batch) == 64:
             solutions = sample(model, batch, tokenizer, device, 500) #solve(qn)
-            j = 0
-            for qn, solution, ds_answer in zip(batch, solutions, answers):
+            for j, (qn, solution, ds_answer) in enumerate(zip(batch, solutions, answers)):
                 answer = compute_result(solution)
                 try:
                     correct_answer = int(ds_answer.split("####")[1].split("<|endoftext|>")[0].strip())
@@ -166,7 +137,6 @@ if __name__ == '__main__':
                     logger.info("Dataset solution: %s" % ds_answer)
                     logger.info(f"LLM answer: {answer}")
                     logger.info(f"LLM solution: {solution}")
-                j += 1
             batch = []
             answers = []
     logger.info("Accuracy: %.3f%%" % (100*correct/total))
