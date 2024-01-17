@@ -43,7 +43,6 @@ import signal
 base_model_id = "microsoft/phi-2"
 #Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
-#Load the model with fp16
 
 USE_VLLM = True
 
@@ -141,7 +140,6 @@ if __name__ == '__main__':
     correct = 0
     total = 0
     device = "cuda:0"
-    # remember the start time:
     start_time = time.time()
     batch = []
     answers = []
@@ -159,14 +157,13 @@ if __name__ == '__main__':
                     correct_answer = int(ds_answer.split("####")[1].split("<|endoftext|>")[0].strip())
                 except ValueError:
                     correct_answer = -88888
-            #remove the commas from the answer:
                 if answer == correct_answer:
                     correct += 1
                 logger.info("Total processed: %d, percent correct: %.3f" % (total, 100.0*correct / total))
                 if answer != correct_answer:
                     logger.info(f"Question number: {i+j}, Question: {qn}")
                     logger.info(f"Dataset answer: {correct_answer}")
-                    logger.info("Dataset solution: %s" % solution)
+                    logger.info("Dataset solution: %s" % ds_answer)
                     logger.info(f"LLM answer: {answer}")
                     logger.info(f"LLM solution: {solution}")
                 j += 1
