@@ -34,17 +34,22 @@ import logging
 from contextlib import contextmanager
 import signal
 
+device = 3
 
-
-
+# Model id and stable revision. For revision, refer to : https://huggingface.co/microsoft/phi-2/commits/main
 base_model_id = "microsoft/phi-2"
-
+base_model_revision = "accfee56d8988cae60915486310362db5831b1bd"
 
 #Load the tokenizer
-tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
+tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=True)
 #Load the model with fp16
-model =  AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 3})
-
+model =  AutoModelForCausalLM.from_pretrained(
+    base_model_id,
+    revision=base_model_revision,
+    trust_remote_code=True,
+    torch_dtype=torch.float16,
+    device_map={"": device}
+)
 
 function_name = "solve_math_problem"
 prompt = f"def {function_name}() -> int:\n    \"\"\"%s Your code must end with a \"return result\" line.\"\"\"\n"
@@ -123,13 +128,13 @@ if __name__ == '__main__':
     logger.info("Using prompt: %s" % prompt)
     correct = 0
     total = 0
-    device = "cuda:3"
+    device_name = f"cuda:{device}"
     # remember the start time:
     start_time = time.time()
     for num, example in enumerate(test_examples):
         total += 1
         qn = example["question"]
-        solution = sample(model, prompt % qn, tokenizer, device, 500) #solve(qn)
+        solution = sample(model, prompt % qn, tokenizer, device_name, 500) #solve(qn)
         answer = compute_result(solution)
         try:
             correct_answer = int(example["answer"].split("####")[1].split("<|endoftext|>")[0].strip())
