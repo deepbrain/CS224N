@@ -31,13 +31,13 @@ else:
     model = AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 0})
 
 function_name = "simple_math_problem"
-prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n    \"\"\"\n"
+prompt = f"def {function_name}() -> int:\n    \"\"\"%s\"\"\"\n"
 #         "       End with a \"return result\" line.\n" + \
 #         "       You must elaborate your thinking in code via comments below\n"
 
-def sample(model, qn, tokenizer, device, sample_len, temperature = 0., top_p = 0.01): #temps higher than 2 do not work well
+def sample(model, qn, tokenizer, device, sample_len, temperature = 0.05, top_p = 0.1): #temps higher than 2 do not work well
     if USE_VLLM:
-        sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=len(qn) + sample_len)
+        sampling_params = SamplingParams(temperature=temperature, top_p=top_p, presence_penalty=0, frequency_penalty=0, max_tokens=len(qn) + sample_len)
         out = model.generate(qn, sampling_params=sampling_params, use_tqdm=False)
         output = []
         for qn, solution in zip(qn, out):
@@ -107,7 +107,7 @@ def compute_result(input_code_string):
 if __name__ == '__main__':
     logger.add("gsm8k_test_set_e5.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    examples = get_examples("test")
+    examples = get_examples("train")
     logger.info("Loaded %d examples" % len(examples))
     logger.info("Using prompt: %s" % prompt)
     correct = 0
@@ -116,13 +116,12 @@ if __name__ == '__main__':
     start_time = time.time()
     batch = []
     answers = []
-    for i in range(len(examples)):
-        total += 1
+    for i in range(64*5):
         batch.append(prompt % examples[i]["question"])
         answers.append(examples[i]["answer"])
         if len(batch) == 64:
             solutions = sample(model, batch, tokenizer, device, 500) #solve(qn)
-            for j, (qn, solution, ds_answer) in enumerate(zip(batch, solutions, answers)):
+            for qn, solution, ds_answer in zip(batch, solutions, answers):
                 answer = compute_result(solution)
                 try:
                     correct_answer = int(ds_answer.split("####")[1].split("<|endoftext|>")[0].strip())
@@ -130,13 +129,12 @@ if __name__ == '__main__':
                     correct_answer = -88888
                 if answer == correct_answer:
                     correct += 1
+                total += 1
                 logger.info("Total processed: %d, percent correct: %.3f" % (total, 100.0*correct / total))
                 if answer != correct_answer:
-                    logger.info(f"Question number: {i+j}, Question: {qn}")
-                    logger.info(f"Dataset answer: {correct_answer}")
-                    logger.info("Dataset solution: %s" % ds_answer)
-                    logger.info(f"LLM answer: {answer}")
-                    logger.info(f"LLM solution: {solution}")
+                    logger.info(f"Question number: {total} Dataset answer: {correct_answer} != LLM answer: {answer}\n" + \
+                                "---Dataset solution: %s \n" % ds_answer + \
+                                f"---LLM solution: {solution}")
             batch = []
             answers = []
     logger.info("Accuracy: %.3f%%" % (100*correct/total))
