@@ -3,7 +3,10 @@ import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3" # adjust this to the GPU you want to use
+
+# adjust this to the GPU you want to use:
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+device = 3
 
 # this code assumes that you cloned the GSM8K repo into the same directory as this repo: git clone https://github.com/openai/grade-school-math/tree/master
 from dataset import get_examples, GSMDataset
@@ -19,21 +22,37 @@ from transformers import (AutoModelForCausalLM,  AutoTokenizer)
 
 
 base_model_id = "microsoft/phi-2"
+base_model_revision = "accfee56d8988cae60915486310362db5831b1bd"
 #Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
 
-USE_VLLM = True
+USE_VLLM = True #TODO: debug code to work without vllm
 
 if USE_VLLM:
     from vllm import LLM, SamplingParams
-    model = LLM(model=base_model_id)
+    model = LLM(model=base_model_id, revision=base_model_revision)
 else:
-    model = AutoModelForCausalLM.from_pretrained(base_model_id, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": 0})
+    model = AutoModelForCausalLM.from_pretrained(base_model_id, revision=base_model_revision, trust_remote_code=True, torch_dtype=torch.float16, device_map={"": device})
 
-function_name = "simple_math_problem"
-prompt = f"def {function_name}() -> int:\n    \"\"\"%s\"\"\"\n"
-#         "       End with a \"return result\" line.\n" + \
-#         "       You must elaborate your thinking in code via comments below\n"
+function_name = "problem"
+prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       Elaborate your thinking step by step in comments before each code line below.\n"
+
+prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s" + \
+         "       Add comments before each line.\n"
+
+prompt3 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       Be accurate and think step by step in comments before each code line below.\n"
+
+prompt4 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       Find unusual solution and comment before each of your line of code.\n"
+
+prompt5 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       In your comments write an algebraic formula based on the problem, solve it algebraically, then write code to calculate the result.\n"
+
+prompt6 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       Find the most elegant and correct solution.\n"
+
 
 def sample(model, qn, tokenizer, device, sample_len, temperature = 0.05, top_p = 0.1): #temps higher than 2 do not work well
     if USE_VLLM:
