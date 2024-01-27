@@ -19,6 +19,11 @@ import logging
 from contextlib import contextmanager
 import signal
 from transformers import (AutoModelForCausalLM,  AutoTokenizer)
+import sympy
+import numpy as np
+import sympy
+import math
+
 
 
 base_model_id = "microsoft/phi-2"
@@ -38,6 +43,7 @@ function_name = "problem"
 prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
          "       Elaborate your thinking step by step in comments before each code line below.\n"
 
+
 prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s" + \
          "       Add comments before each line.\n"
 
@@ -53,10 +59,22 @@ prompt5 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
 prompt6 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
          "       Find the most elegant and correct solution.\n"
 
+prompt7 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       Think step by step in comments before each code line below."
+
+prompt8 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+         "       You must elaborate your thinking in comments below."
+
+prompt9 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+"""      Is this a simple math or algebra problem? For algebra problems, you must elaborate and solve it algebraically in the comments first, then write code to calculate the result. For simple math problems, you can write code to calculate the result directly.\n"""
+
+prompt10 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+"""    First, let's solve this problem using pure symbolic expressions. Elaborate with your algebraic skills below. Use x,y,z...to denote unknown variables. Use a,b,c... to denote given constants. Then write a pure python code to compute and return the result.\n    Let x be"""
+
 
 def sample(model, qn, tokenizer, device, sample_len, temperature = 0.05, top_p = 0.1): #temps higher than 2 do not work well
     if USE_VLLM:
-        sampling_params = SamplingParams(temperature=temperature, top_p=top_p, presence_penalty=0, frequency_penalty=0, max_tokens=len(qn) + sample_len)
+        sampling_params = SamplingParams(temperature=temperature, top_p=top_p, presence_penalty=0.1, frequency_penalty=0, max_tokens=len(qn) + sample_len)
         out = model.generate(qn, sampling_params=sampling_params, use_tqdm=False)
         output = []
         for qn, solution in zip(qn, out):
@@ -123,10 +141,36 @@ def compute_result(input_code_string):
         logger.error(f"Code that caused the error: {input_code_string}")
         return -99999
 
+check = """def problem() -> int:
+    \"\"\"Josh decides to try flipping a house.  He buys a house for $80,000 and then puts in $50,000 in repairs.  This increased the value of the house by 150%.  How much profit did he make?
+
+       Elaborate your thinking step by step in comments before each code line below.
+    \"\"\"
+    house_price = 80000
+    repair_cost = 50000
+    increase_percentage = 150
+    
+    # Calculate the increase in value of the house
+    increase_in_value = (house_price + repair_cost) * increase_percentage / 100
+    
+    # Calculate the total value of the house after repairs
+    total_value = house_price + repair_cost + increase_in_value
+    
+    # Calculate the profit made by Josh
+    profit = total_value - (house_price + repair_cost)
+    
+    result = profit
+    return result
+    
+    #Task: Identify logic issues and write code to fix: 
+"""
+batch = [check]
+sol = sample(model, batch, tokenizer, device, 1000, temperature=0.05, top_p=0.1)
+
 if __name__ == '__main__':
     logger.add("gsm8k_test_set_e5.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    examples = get_examples("train")
+    examples = get_examples("test")
     logger.info("Loaded %d examples" % len(examples))
     logger.info("Using prompt: %s" % prompt)
     correct = 0
@@ -135,7 +179,7 @@ if __name__ == '__main__':
     start_time = time.time()
     batch = []
     answers = []
-    for i in range(64*5):
+    for i in range(64):
         batch.append(prompt % examples[i]["question"])
         answers.append(examples[i]["answer"])
         if len(batch) == 64:
@@ -151,7 +195,7 @@ if __name__ == '__main__':
                 total += 1
                 logger.info("Total processed: %d, percent correct: %.3f" % (total, 100.0*correct / total))
                 if answer != correct_answer:
-                    logger.info(f"Question number: {total} Dataset answer: {correct_answer} != LLM answer: {answer}\n" + \
+                    logger.info(f"---Dataset answer: {correct_answer} != LLM answer: {answer}\n" + \
                                 "---Dataset solution: %s \n" % ds_answer + \
                                 f"---LLM solution: {solution}")
             batch = []
