@@ -16,7 +16,7 @@ class LearningDriver:
     def upload_best_solutions(self): # uploads locally best solutions to github once a day
         raise NotImplementedError
 
-    def mege_best_solutions(self): #downloads best solutions from github and merges them with the local best solutions
+    def merge_best_solutions(self): #downloads best solutions from github and merges them with the local best solutions
         raise NotImplementedError
 
     def train_models(self): #trains lora models on the merged best solutions
