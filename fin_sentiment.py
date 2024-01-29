@@ -123,7 +123,7 @@ class TokenizedDataset(Dataset):
         for s in list_of_strings:
             encoded = tokenizer(
                 text=s + tokenizer.eos_token,
-                return_tensors="np",  # Use PyTorch tensors
+                return_tensors="np",
                 truncation=True,
                 max_length=max_length,
                 padding=pad,
