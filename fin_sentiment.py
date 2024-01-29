@@ -6,7 +6,6 @@ import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-import os
 try:
     token = os.environ["HF_API_TOKEN"]
 except:
@@ -17,14 +16,11 @@ import warnings
 warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
-import os
 import time
 from tqdm import tqdm
 import bitsandbytes as bnb
 import torch
 import torch.nn as nn
-import transformers
-from datasets import Dataset
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer
 from transformers import (AutoModelForCausalLM,
@@ -48,7 +44,9 @@ from peft import LoraConfig, get_peft_model, PeftModel
 from accelerate import Accelerator
 from transformers import TrainingArguments, Trainer
 from functools import partial
-from datasets import Dataset
+# from datasets import Dataset
+from torch.utils.data import Dataset
+from datasets import Dataset as HFDataset
 
 
 
@@ -81,7 +79,7 @@ def load_data():
     X_test = list()
     for sentiment in ["positive", "neutral", "negative"]:
         train, test = train_test_split(df[df.sentiment == sentiment],
-                                       train_size=100,
+                                       train_size=10,
                                        test_size=100,
                                        random_state=42)
         X_train.append(train)
@@ -105,9 +103,44 @@ def load_data():
     y_true = X_test.sentiment
     X_test = pd.DataFrame(X_test.apply(generate_test_prompt, axis=1), columns=["text"])
 
-    train_data = Dataset.from_pandas(X_train)
-    eval_data = Dataset.from_pandas(X_eval)
-    return train_data, eval_data, X_test, y_true
+    #train_data = Dataset.from_pandas(X_train)
+    #eval_data = Dataset.from_pandas(X_eval)
+    return X_train, X_eval, X_test, y_true
+
+
+class TokenizedDataset(Dataset):
+
+    def __init__(self, list_of_strings, tokenizer, eval = False):
+        self.data = []
+        self.tokenizer = tokenizer
+        self.total_calls = 0
+        if eval:
+            pad = "max_length"
+            max_length = 2048
+        else:
+            pad = "do_not_pad"
+            max_length = 2048
+        for s in list_of_strings:
+            encoded = tokenizer(
+                text=s + tokenizer.eos_token,
+                return_tensors="np",  # Use PyTorch tensors
+                truncation=True,
+                max_length=max_length,
+                padding=pad,
+            )
+            self.data.append({
+                'input_ids': encoded['input_ids'].squeeze(0),
+                'labels': encoded['input_ids'].squeeze(0),
+                'attention_mask': encoded['attention_mask'].squeeze(0)
+            })
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        self.total_calls += 1
+        return self.data[idx]
+
 
 def tokenize_data(tokenizer, data):
     def collate_and_tokenize(example):
@@ -288,9 +321,10 @@ def train(trained_model_name, train_data, eval_data, base_model_id = "microsoft/
     # expects dataset in form of dict with keys "text", read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
     tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=True)
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
-    train_data = tokenize_data(tokenizer, train_data)
-    eval_data = tokenize_data(tokenizer, eval_data)
+    train_data1 = TokenizedDataset(train_data["text"].tolist(), tokenizer)
+    eval_data1 = TokenizedDataset(eval_data["text"].tolist(), tokenizer, eval = True)
 
     compute_dtype = getattr(torch, "float16")
 
@@ -334,6 +368,7 @@ def train(trained_model_name, train_data, eval_data, base_model_id = "microsoft/
         output_dir="logs",
         num_train_epochs=4,
         per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
         gradient_accumulation_steps=8,  # 4
         optim="paged_adamw_32bit",
         save_steps=0,
@@ -348,18 +383,18 @@ def train(trained_model_name, train_data, eval_data, base_model_id = "microsoft/
         group_by_length=True,
         lr_scheduler_type="cosine",
         report_to="tensorboard",
-        evaluation_strategy="epoch"
+        evaluation_strategy="epoch",
+        eval_accumulation_steps = 5
     )
 
     trainer = SFTTrainer(
         model=model,
-        train_dataset=train_data,
-        eval_dataset=eval_data,
+        train_dataset=train_data1,
+        eval_dataset=eval_data1,
         peft_config=config,
-        dataset_text_field="text",
         tokenizer=tokenizer,
         args=training_arguments,
-        packing=False, #TODO debug code to work with packing - shuld be faster
+        packing=True,
         max_seq_length=2048,
     )
     trainer.train()
