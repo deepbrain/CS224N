@@ -285,6 +285,8 @@ class MathLLM:
             self.model = trainer.model
             self.model.eval()
             if merge:
+                if self.use_quantization: #TODO: implement merging in quantization mode
+                    logger.warning("Merging is not supported in quantization mode")
                 self.merge_lora()
 
 
@@ -443,21 +445,23 @@ def predict(X_test, LLM, batch_size=16):
             prompts = []
     return y_pred
 
+import logging
 
 def main():
+    logger.add('math_llm.log', rotation="10 MB")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S')
     train_data, eval_data, X_test, y_true = load_data()
+
+    logger.warning("DO NOT use quantization if your GPU has more than 20GB of memory. It is slow and can't be merged into base model.")
     LLM = MathLLM("microsoft/phi-2", use_quantization=True, load=False)
     LLM.train(train_data, eval_data, "phi-2-test5", merge=True) # traning takes about 40 minutes on 1 A5000
     del LLM
-    LLM = MathLLM("phi-2-test5", load=True) #loading in regular mode
+    LLM = MathLLM("phi-2-test5-lora", use_quantization=True, load=True) #loading in lora mode
     y_pred = predict(X_test, LLM, batch_size=16)
     evaluate(y_true, y_pred)
     del LLM
-    LLM = MathLLM("phi-2-test5-lora", load=True) #loading in lora mode
-    y_pred = predict(X_test, LLM, batch_size=16)
-    evaluate(y_true, y_pred)
-    del LLM
-    LLM = MathLLM("phi-2-test5", use_quantization=True, load=True) #loading in quantized mode
+    LLM = MathLLM("phi-2-test5", use_quantization=True, load=True) #loading in regular mode
     y_pred = predict(X_test, LLM, batch_size=16)
     evaluate(y_true, y_pred)
     del LLM
