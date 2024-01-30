@@ -198,7 +198,7 @@ class MathLLM:
             if self.model_id.endswith("-lora"):
                 peft_config = PeftConfig.from_pretrained(self.model_id)
                 base_model_id = peft_config.base_model_name_or_path
-                base_model_revision = peft_config.base_model_revision
+                base_model_revision = self.revision
             else:
                 base_model_id = self.model_id
                 base_model_revision = self.revision
@@ -283,6 +283,7 @@ class MathLLM:
             trainer.model.save_pretrained(new_model_id)
             base_tokenizer.save_pretrained(new_model_id)
             self.model = trainer.model
+            self.model.eval()
             if merge:
                 self.merge_lora()
 
@@ -447,10 +448,6 @@ def main():
     train_data, eval_data, X_test, y_true = load_data()
     LLM = MathLLM("microsoft/phi-2", use_quantization=True, load=False)
     LLM.train(train_data, eval_data, "phi-2-test5", merge=True) # traning takes about 40 minutes on 1 A5000
-    del LLM
-    LLM = MathLLM("phi-2-test5", load=True)
-    y_pred = predict(X_test, LLM, batch_size=16)
-    evaluate(y_true, y_pred)
     del LLM
     LLM = MathLLM("phi-2-test5", load=True) #loading in regular mode
     y_pred = predict(X_test, LLM, batch_size=16)
