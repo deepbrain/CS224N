@@ -18,9 +18,7 @@ import numpy as np
 import pandas as pd
 import time
 from tqdm import tqdm
-import bitsandbytes as bnb
 import torch
-import torch.nn as nn
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer
 from transformers import (AutoModelForCausalLM,
@@ -36,7 +34,6 @@ from sklearn.metrics import (accuracy_score,
                              confusion_matrix)
 from sklearn.model_selection import train_test_split
 
-from langchain.llms import HuggingFacePipeline
 from vllm import LLM, SamplingParams
 
 from peft import prepare_model_for_kbit_training
@@ -79,8 +76,8 @@ def load_data():
     X_test = list()
     for sentiment in ["positive", "neutral", "negative"]:
         train, test = train_test_split(df[df.sentiment == sentiment],
-                                       train_size=10,
-                                       test_size=100,
+                                       train_size=300,
+                                       test_size=300,
                                        random_state=42)
         X_train.append(train)
         X_test.append(test)
@@ -109,7 +106,6 @@ def load_data():
 
 
 class TokenizedDataset(Dataset):
-
     def __init__(self, list_of_strings, tokenizer, eval = False):
         self.data = []
         self.tokenizer = tokenizer
@@ -392,7 +388,7 @@ def train(trained_model_name, train_data, eval_data, base_model_id = "microsoft/
         train_dataset=train_data1,
         eval_dataset=eval_data1,
         peft_config=config,
-        tokenizer=tokenizer,
+#        tokenizer=tokenizer,
         args=training_arguments,
         packing=True,
         max_seq_length=2048,
