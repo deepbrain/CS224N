@@ -7,7 +7,7 @@ except:
 
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
-os.environ["CUDA_VISIBLE_DEVICES"] = "2" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
+os.environ["CUDA_VISIBLE_DEVICES"] = "1" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
 
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer
@@ -27,22 +27,23 @@ import torch
 from loguru import logger
 from torch.utils.data import Dataset
 import random
+BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 
 class TokenizedDataset(Dataset):
-    def __init__(self, list_of_strings, tokenizer, eval = False):
+    def __init__(self, list_of_strings, tokenizer):
         self.data = []
         self.tokenizer = tokenizer
         self.total_calls = 0
         self.total_length = 0
         tokenizer.padding_side = "right"
         pad = "do_not_pad"
-        max_length = 1024
+        self.max_length = 2048
         for s in list_of_strings:
             encoded = tokenizer(
                 text=s + tokenizer.eos_token,
                 return_tensors="np",
                 truncation=True,
-                max_length=max_length,
+                max_length=self.max_length,
                 padding=pad,
             )
             self.total_length += encoded['input_ids'].shape[1]
@@ -53,11 +54,10 @@ class TokenizedDataset(Dataset):
             })
         self.mean_length = self.total_length / len(list_of_strings)
         logger.info(f"Mean length of tokens per window: {self.mean_length}")
-        self.max_length = 1024
-        self.pack(self.max_length, 64)
+        self.pack(64)
 
 
-    def pack(self, max_length, N):
+    def pack(self, N):
         data_pack = self.data.copy()
         self.packed_data = []
         total_length = 0
@@ -73,15 +73,15 @@ class TokenizedDataset(Dataset):
             for idx in sampled_indices:
                 item = data_pack[idx]
                 item_length = len(item['input_ids'])
-                if current_length + item_length <= max_length:
+                if current_length + item_length <= self.max_length:
                     for key in combined_item:
                         combined_item[key] = np.concatenate([combined_item[key], item[key]]) if combined_item[key].size else item[key]
                     current_length += item_length
                     items_to_remove.append(idx)
 
-            # Padding to reach max_length if necessary
-            padding_length = max_length - current_length
             total_length += current_length
+            # Padding to reach max_length - not sure why, but it seems to improve accuracy
+            padding_length = self.max_length - current_length
             if padding_length > 0:
                 pad_token_id = self.tokenizer.pad_token_id
                 for key in combined_item:
@@ -108,14 +108,14 @@ class TokenizedDataset(Dataset):
         self.total_calls += 1
         if self.total_calls > len(self.packed_data):
             prev_len = len(self.packed_data)
-            self.pack(self.max_length, 64)
+            self.pack(64)
             while len(self.packed_data) < prev_len:
                 idx = random.randint(0, len(self.packed_data) - 1)
                 self.packed_data.append(self.packed_data[idx])
         return self.packed_data[idx]
 
 class MathLLM:
-    def __init__(self, model_id, revision = "accfee56d8988cae60915486310362db5831b1bd", use_quantization = False, use_vllm = False, load = False):
+    def __init__(self, model_id, revision = None, use_quantization = False, use_vllm = False, load = False):
         self.model_id = model_id
         self.revision = revision
         self.use_quantization = use_quantization
@@ -124,12 +124,26 @@ class MathLLM:
         self.tokenizer = None
         self.HAS_BFLOAT16 = torch.cuda.is_bf16_supported()
         if self.HAS_BFLOAT16:
-            self.torch_dtype = torch.bfloat16
+            self.torch_dtype = torch.float16 #need to match the Phi2 training type
         else:
             self.torch_dtype = torch.float16
 
         if load:
             self.model, self.tokenizer = self.load_model(model_id, revision)
+
+    def load_base_model(self, model_id, revision):
+        return AutoModelForCausalLM.from_pretrained(
+            model_id,
+            #            revision=revision,
+            load_in_8bit=False,
+            return_dict=True,
+            do_sample=True,
+            device_map="auto",
+#            attn_implementation="flash_attention_2",
+            quantization_config=self.get_bnbs_config(),
+            torch_dtype=self.torch_dtype,
+            # torch_dtype=torch.float16, #should this match the training dtype?
+        )
 
     def load_model(self, model_name=None, base_model_revision=None):
         self.unload_model()
@@ -198,24 +212,12 @@ class MathLLM:
            output.append(prompt + completion.outputs[0].text)
         return output
 
+
     def load_model_lora(self, model_id, adapter_only = False):
         peft_config = PeftConfig.from_pretrained(model_id)
-        bnb_config = self.get_bnbs_config()
         if not adapter_only: # load the base model too
             self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, use_fast=True)
-            self.base_model = AutoModelForCausalLM.from_pretrained(
-                    peft_config.base_model_name_or_path,
-                    revision=self.revision,
-                    load_in_8bit=False,
-                    return_dict=True,
-                    do_sample=True,
-                    device_map="auto",
-#                    attn_implementation="flash_attention_2",
-                    quantization_config=bnb_config,
-                    torch_dtype=self.torch_dtype,
-                    #torch_dtype=torch.float16, #should this match the training dtype?
-                    low_cpu_mem_usage=True,
-            )
+            self.base_model = self.load_base_model(peft_config.base_model_name_or_path, self.revision)
         self.model = PeftModel.from_pretrained(
             self.base_model,
             model_id,
@@ -228,18 +230,7 @@ class MathLLM:
     def load_model_regular(self, model_id, base_model_revision):
         bnb_config = self.get_bnbs_config()
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=base_model_revision, trust_remote_code=True, use_fast=True)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            revision=base_model_revision,
-            load_in_8bit=False,
-            return_dict=True,
-            do_sample=True,
-            device_map="auto",
-            quantization_config=bnb_config,
-#            attn_implementation="flash_attention_2",
-            torch_dtype=self.torch_dtype, #should this match the training dtype?
-            low_cpu_mem_usage=True,
-        )
+        self.model = self.load_base_model(model_id, base_model_revision)
         return self.model, self.tokenizer
 
     def get_bnbs_config(self):
@@ -268,24 +259,21 @@ class MathLLM:
 
             self.unload_model()
 
-            base_model = AutoModelForCausalLM.from_pretrained(base_model_id,
-                                                         revision=base_model_revision,
-                                                         trust_remote_code=True,
-#                                                         attn_implementation="flash_attention_2",
-                                                         quantization_config=self.get_bnbs_config(),
-                                                         torch_dtype=self.torch_dtype,
-                                                         device_map="auto")
+            base_model = self.load_base_model(base_model_id, base_model_revision)
             base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=True)
 
             base_tokenizer.pad_token = base_tokenizer.eos_token
             base_tokenizer.padding_side = "right"
 
             train_data = TokenizedDataset(problems, base_tokenizer)
-            eval_data = TokenizedDataset(eval_problems, base_tokenizer, eval=True)
+            eval_data = TokenizedDataset(eval_problems, base_tokenizer)
 
 
             base_model.config.use_cache = False
             base_model.config.pretraining_tp = 1
+
+            # gradient checkpointing to save memory
+            base_model.gradient_checkpointing_enable()
 
             config = LoraConfig(
                 r=16,
@@ -307,16 +295,21 @@ class MathLLM:
             training_arguments = TrainingArguments(
                 output_dir="logs",
                 num_train_epochs=4,
+                gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
                 gradient_accumulation_steps=1,  # 4
                 optim="paged_adamw_32bit",
+                adam_beta1=0.9, #--------
+                adam_beta2=0.95, #-----------
                 save_steps=0,
-                logging_steps=25,
+                logging_steps=1,
                 learning_rate=7e-4,
-                weight_decay=0.001,
-                fp16=not self.HAS_BFLOAT16,
-                bf16=self.HAS_BFLOAT16,
+                weight_decay=0.01,
+                fp16 = False,
+                bf16 = False,
+#                fp16=not self.HAS_BFLOAT16,
+#                bf16=self.HAS_BFLOAT16,
                 max_grad_norm=0.3,
                 max_steps=-1,
                 warmup_ratio=0.03,
@@ -333,7 +326,7 @@ class MathLLM:
                 peft_config=config,
                 tokenizer=base_tokenizer,
                 args=training_arguments,
-                packing=True,
+                packing=False,
                 dataset_text_field="text",
                 max_seq_length=2048,
             )
@@ -518,20 +511,20 @@ def main():
                         datefmt='%Y-%m-%d %H:%M:%S')
     train_data, eval_data, X_test, y_true = load_data()
 
-    logger.warning("DO NOT use quantization if your GPU has more than 20GB of memory. It is slow and can't be merged into base model.")
-    LLM = MathLLM("microsoft/phi-2", use_quantization=False, load=False)
-    LLM.train(train_data, eval_data, "phi-2-pad1024", merge=True) # traning takes about 40 minutes on 1 A5000
+#    logger.warning("DO NOT use quantization if your GPU has more than 10GB of memory. It is slow and can't be merged into base model.")
+    LLM = MathLLM("microsoft/phi-2",  load=False)
+    LLM.train(train_data, eval_data, "phi-2-pad2048", merge=True) # traning takes about 40 minutes on 1 A5000
     del LLM
-    LLM = MathLLM("phi-2-pad1024-lora", use_quantization=False, load=True) #loading in lora mode
-    y_pred = predict(X_test, LLM, batch_size=16)
+    LLM = MathLLM("phi-2-pad2048-lora", load=True) #loading in lora mode
+    y_pred = predict(X_test, LLM, batch_size=128)
     evaluate(y_true, y_pred)
     del LLM
-    LLM = MathLLM("phi-2-pad1024", use_quantization=False, load=True) #loading in regular mode
-    y_pred = predict(X_test, LLM, batch_size=16)
+    LLM = MathLLM("phi-2-pad2048", load=True) #loading in regular mode
+    y_pred = predict(X_test, LLM, batch_size=128)
     evaluate(y_true, y_pred)
     del LLM
-    LLM = MathLLM("phi-2-pad1024", use_vllm=True, load=True) #loading in vllm mode
-    y_pred = predict(X_test, LLM, batch_size=16)
+    LLM = MathLLM("phi-2-pad2048", use_vllm=True, load=True) #loading in vllm mode
+    y_pred = predict(X_test, LLM, batch_size=128)
     evaluate(y_true, y_pred)
 
 
