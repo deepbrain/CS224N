@@ -1,5 +1,6 @@
 from typing import Optional, Iterable, List
 from cot_prompt_examples import COT_3_shot_promtps
+from itertools import chain
 
 PRIMER = ("You carefully provide accurate answers, and are brilliant at math and reasoning.\n"
           +"Think thoroughly of your code, explain the reasoning of each line of code in a comment.")
@@ -88,17 +89,23 @@ def _get_regular_prompts(qn: str) -> List[str]:
 
     return [prompt_fn(qn) for prompt_fn in [prompt1_fn, prompt2_fn, prompt3_fn]]
 
-def _get_cot_prompts(qn: str) -> List[str]:
+def _get_few_shot_prompts(qn: str) -> List[str]:
     prompt1_fn = lambda qn: CodePrompt(qn).get_prompt()
     kshot_prompts = []
-    for cot_prompt_group in COT_3_shot_promtps:
-        prompt1_3shot_fn = lambda qn: ConcatPrompt(list(map(PromptBase, cot_prompt_group)) + [PromptBase(prompt1_fn(qn))]).get_prompt()
-        kshot_prompts.append(prompt1_3shot_fn(qn))
+
+    # We currently have to do this conversion since we currently only effectively support
+    # a context window of 1024 tokens and a 3shot prompt results in ~900 tokens already.
+    # Hence we split up 5 3-shot prompts into 15 1-shot prompts.
+    COT_1_shot_promtps = chain.from_iterable(COT_3_shot_promtps)
+    COT_1_shot_promtps = [[one_shot_prompt] for one_shot_prompt in COT_1_shot_promtps]
+    
+    for cot_prompt_group in COT_1_shot_promtps:
+        prompt1_1shot_fn = lambda qn: ConcatPrompt(list(map(PromptBase, cot_prompt_group)) + [PromptBase(prompt1_fn(qn))]).get_prompt()
+        kshot_prompts.append(prompt1_1shot_fn(qn))
     return kshot_prompts
 
 def get_all_prompts(question: str) -> List[str]:
     """ Main entrance API, given a question as a string, returns multiple
     useful prompts to generate answers.
     """
-    return _get_regular_prompts(question) + _get_cot_prompts(question)
-    
+    return _get_regular_prompts(question) + _get_few_shot_prompts(question)
