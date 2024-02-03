@@ -134,7 +134,7 @@ class MathLLM:
     def load_base_model(self, model_id, revision):
         return AutoModelForCausalLM.from_pretrained(
             model_id,
-            #            revision=revision,
+            revision=revision,
             load_in_8bit=False,
             return_dict=True,
             do_sample=True,
@@ -142,7 +142,6 @@ class MathLLM:
 #            attn_implementation="flash_attention_2",
             quantization_config=self.get_bnbs_config(),
             torch_dtype=self.torch_dtype,
-            # torch_dtype=torch.float16, #should this match the training dtype?
         )
 
     def load_model(self, model_name=None, base_model_revision=None):
@@ -228,7 +227,6 @@ class MathLLM:
         return self.model, self.tokenizer
 
     def load_model_regular(self, model_id, base_model_revision):
-        bnb_config = self.get_bnbs_config()
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         self.model = self.load_base_model(model_id, base_model_revision)
         return self.model, self.tokenizer
@@ -277,7 +275,7 @@ class MathLLM:
 
             config = LoraConfig(
                 r=16,
-                lora_alpha=32,
+                lora_alpha=16,
                 target_modules=[
                     'q_proj',
                     'k_proj',
@@ -287,7 +285,7 @@ class MathLLM:
                     'fc2',
                 ],  # print(model) will show the modules to use
                 bias="none",
-                lora_dropout=0.05,
+                lora_dropout=0.1,
                 task_type="CAUSAL_LM",
             )
 
