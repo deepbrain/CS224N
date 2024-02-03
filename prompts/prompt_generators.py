@@ -53,7 +53,7 @@ class CodePrompt(PromptBase):
                 + (f"{primer}\n" if primer else "")
                 + f"Solve the following problem. {question}"
                 + (f"{suffix}\n" if suffix else "")
-                + f"Your code must end with a \"return result\" line.\"\"\"\n"
+                + f"\"\"\"\n"
                 # Optionally add answer
                 + (answer if answer else "")
         )

@@ -9,6 +9,7 @@ class Solution:
         self.problem = problem
         self.model_manager = model_manager
         self.prompt = prompt
+        self.function_name = "problem"
         self.log = log
 
 
