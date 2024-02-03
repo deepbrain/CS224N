@@ -126,6 +126,8 @@ def _get_regular_prompts(qn: str) -> List[str]:
     "Use a,b,c... to denote given constants. Then write a pure python code to compute and return the result."
     prompt13_fn = lambda qn: CodePrompt(qn, primer=prompt3_primer, suffix=prompt13_suffix).get_prompt()
 
+    # print()
+
     prompt_fn_list = [prompt1_fn, prompt2_fn, prompt3_fn, prompt4_fn, prompt5_fn,
                       prompt6_fn, prompt7_fn, prompt8_fn, prompt9_fn, prompt10_fn,
                       prompt11_fn, prompt12_fn, prompt13_fn]
