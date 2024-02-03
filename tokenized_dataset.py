@@ -3,6 +3,7 @@ import numpy as np
 from torch.utils.data import Dataset
 import random
 
+
 class TokenizedDataset(Dataset):
     def __init__(self, list_of_strings, tokenizer, max_length=2048):
         self.data = []

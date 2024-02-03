@@ -1,5 +1,8 @@
 from contextlib import contextmanager
 import signal
+from loguru import logger
+
+INVALID_ANSWER = -99999
 
 # taken from
 # https://stackoverflow.com/questions/492519/timeout-on-a-function-call
@@ -32,12 +35,12 @@ def compute_result(input_code_string, function_name):
                 except Exception as e:
                     logger.error(f"An error occurred: {e}")
                     logger.error(f"Code that caused the error: {input_code_string}")
-                    return -99999
+                    return INVALID_ANSWER
         else:
             # Function name not found
-            return -99999
+            return INVALID_ANSWER
     except Exception as e:
         # Handle any exception that occurs
         logger.error(f"An error occurred: {e}")
         logger.error(f"Code that caused the error: {input_code_string}")
-        return -99999
+        return INVALID_ANSWER

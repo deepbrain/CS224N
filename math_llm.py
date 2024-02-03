@@ -26,6 +26,8 @@ from peft import LoraConfig, get_peft_model, PeftModel
 import torch
 from loguru import logger
 from tokenized_dataset import TokenizedDataset
+import asyncio
+from functools import partial
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 
 class MathLLM:
@@ -42,6 +44,7 @@ class MathLLM:
             self.torch_dtype = torch.float16 #need to match the Phi2 training type
         else:
             self.torch_dtype = torch.float16
+        self.lock = asyncio.Lock()
 
         if load:
             self.model, self.tokenizer = self.load_model(model_id, revision)
@@ -125,6 +128,14 @@ class MathLLM:
         for prompt, completion in zip(batch, results):
            output.append(prompt + completion.outputs[0].text)
         return output
+
+    async def process_batch_async(self, batch, max_tokens, temperature=0.5, top_p=0.2, presence_penalty=0.1, frequency_penalty=0.1):
+        async with self.lock:
+            loop = asyncio.get_running_loop()
+            # Use functools.partial to pass arguments to the function
+            func = partial(self.process_batch, batch, max_tokens, temperature, top_p, presence_penalty, frequency_penalty)
+            result = await loop.run_in_executor(None, func)
+            return result
 
 
     def load_model_lora(self, model_id, adapter_only = False):

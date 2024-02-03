@@ -1,5 +1,5 @@
 from typing import Optional, Iterable, List
-from cot_prompt_examples import COT_3_shot_promtps
+from prompts.cot_prompt_examples import COT_3_shot_promtps
 from itertools import chain
 
 PRIMER = ("You carefully provide accurate answers, and are brilliant at math and reasoning.\n"
