@@ -25,13 +25,22 @@ from peft import prepare_model_for_kbit_training
 from peft import LoraConfig, get_peft_model, PeftModel
 import torch
 from loguru import logger
-from tokenized_dataset import TokenizedDataset
 import asyncio
 from functools import partial
+from tokenized_dataset import TokenizedDataset, TokenizedQADataset
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 
 class MathLLM:
-    def __init__(self, model_id, revision = None, use_quantization = False, use_vllm = False, load = False, max_context_length=2048):
+    def __init__(
+        self,
+        model_id,
+        revision = None,
+        use_quantization = False,
+        use_vllm = False,
+        load = False,
+        max_context_length=2048,
+        dataset_class=TokenizedDataset,
+    ):
         self.model_id = model_id
         self.revision = revision
         self.use_quantization = use_quantization
@@ -40,6 +49,8 @@ class MathLLM:
         self.tokenizer = None
         self.HAS_BFLOAT16 = torch.cuda.is_bf16_supported()
         self.max_context_length = max_context_length
+        self.dataset_class = dataset_class
+
         if self.HAS_BFLOAT16:
             self.torch_dtype = torch.float16 #need to match the Phi2 training type
         else:
@@ -185,13 +196,11 @@ class MathLLM:
 
             base_model = self.load_base_model(base_model_id, base_model_revision)
             base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=True)
-
             base_tokenizer.pad_token = base_tokenizer.eos_token
             base_tokenizer.padding_side = "right"
 
-            train_data = TokenizedDataset(problems, base_tokenizer, self.max_context_length)
-            eval_data = TokenizedDataset(eval_problems, base_tokenizer, self.max_context_length)
-
+            train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
+            eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
 
             base_model.config.use_cache = False
             base_model.config.pretraining_tp = 1
@@ -317,22 +326,18 @@ if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 
 def generate_prompt(data_point):
-    return f"""The sentiment of the following phrase: '{data_point["text"]}' is
-            \n\n Positive
-            \n Negative
-            \n Neutral
-            \n Cannot be determined
-            \n\nSolution: The correct option is {data_point["sentiment"]}""".strip()
+    question = f"""The sentiment of the following phrase: '{data_point["text"]}' is
+        \n\n Positive
+        \n Negative
+        \n Neutral
+        \n Cannot be determined
+        \n\nSolution: The correct option is """
+    if 'sentiment' in data_point:
+        answer = f"{data_point['sentiment']}"
+        return question, answer
+    return question
 
-def generate_test_prompt(data_point):
-    return f"""The sentiment of the following phrase: '{data_point["text"]}' is
-            \n\n Positive
-            \n Negative
-            \n Neutral
-            \n Cannot be determined
-            \n\nSolution: The correct option is""".strip()
-
-def load_data():
+def load_data(dataset_class=TokenizedDataset):
     filename = "./fin_sentiment_test_data/all-data.csv"
 
     df = pd.read_csv(filename,
@@ -358,16 +363,28 @@ def load_data():
               .apply(lambda x: x.sample(n=50, random_state=10, replace=True)))
     X_train = X_train.reset_index(drop=True)
 
-    X_train = pd.DataFrame(X_train.apply(generate_prompt, axis=1),
-                           columns=["text"])
-    X_eval = pd.DataFrame(X_eval.apply(generate_prompt, axis=1),
-                          columns=["text"])
+    X_train = X_train.apply(generate_prompt, axis=1)
+    X_eval = X_eval.apply(generate_prompt, axis=1)
+    
+    if dataset_class == TokenizedDataset:
+        X_train = [q + a for q, a in X_train.tolist()]
+        X_eval = [q + a for q, a in X_eval.tolist()]
+        X_train = pd.DataFrame(X_train, columns=["text"])
+        X_eval = pd.DataFrame(X_eval, columns=["text"])
+        train_data = X_train['text'].tolist()
+        eval_data = X_eval['text'].tolist()
+
+    elif dataset_class == TokenizedQADataset:
+        X_train = pd.DataFrame(X_train.tolist(), columns=["question", "answer"])
+        X_eval = pd.DataFrame(X_eval.tolist(), columns=["question", "answer"])
+        # return lists of (question, answer) pairs
+        train_data = list(zip(X_train['question'].tolist(), X_train['answer'].tolist()))
+        # return lists of (question, answer) pairs
+        eval_data = list(zip(X_eval['question'].tolist(), X_eval['answer'].tolist()))
 
     y_true = X_test.sentiment
-    X_test = pd.DataFrame(X_test.apply(generate_test_prompt, axis=1), columns=["text"])
+    X_test = pd.DataFrame(X_test[["text"]].apply(generate_prompt, axis=1), columns=["text"])
 
-    train_data = X_train['text'].tolist()
-    eval_data = X_eval['text'].tolist()
     return train_data, eval_data, X_test, y_true
 
 
@@ -430,13 +447,16 @@ def predict(X_test, LLM, batch_size=16):
 import logging
 
 def main():
+    training_dataset_class = TokenizedQADataset
+    
     logger.add('math_llm.log', rotation="10 MB")
+    logger.info(f"Using {training_dataset_class} for the training dataset.")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
-    train_data, eval_data, X_test, y_true = load_data()
+    train_data, eval_data, X_test, y_true = load_data(training_dataset_class)
 
 #    logger.warning("DO NOT use quantization if your GPU has more than 10GB of memory. It is slow and can't be merged into base model.")
-    LLM = MathLLM("microsoft/phi-2",  load=False)
+    LLM = MathLLM("microsoft/phi-2",  load=False, dataset_class=training_dataset_class)
     LLM.train(train_data, eval_data, "phi-2-pad2048", merge=True) # traning takes about 40 minutes on 1 A5000
     del LLM
     LLM = MathLLM("phi-2-pad2048-lora", load=True) #loading in lora mode

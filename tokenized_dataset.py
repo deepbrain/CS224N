@@ -62,6 +62,9 @@ class TokenizedDataset(Dataset):
                 for key in combined_item:
                     combined_item[key] = np.pad(combined_item[key], (0, padding_length),
                                                 constant_values=pad_token_id)
+                    # we don't want to incurr a loss in the padding items
+                    if key == "labels" and padding_length > 0:
+                        combined_item[key][-padding_length:] = -100
 
             # Ensure we always have at least one item to add to avoid empty data
             if items_to_remove:
@@ -88,3 +91,51 @@ class TokenizedDataset(Dataset):
                 idx = random.randint(0, len(self.packed_data) - 1)
                 self.packed_data.append(self.packed_data[idx])
         return self.packed_data[idx]
+
+class TokenizedQADataset(TokenizedDataset):
+    """
+    Same as the tokenized dataset, but designed to "mask out" the labels of
+    the prompts such that they don't affect the model's loss.
+    
+    Question and answer pairs are concatenated as they are given. Make sure
+    to include the right separator between them (" ", "\n", ". ", etc.)
+    """
+    def __init__(self, list_of_question_answers, tokenizer, max_length=2048):
+        self.data = []
+        self.tokenizer = tokenizer
+        self.total_calls = 0
+        self.total_length = 0
+        tokenizer.padding_side = "right"
+        pad = "do_not_pad"
+        self.max_length = max_length
+        for question, answer in list_of_question_answers:
+            encoded_question = tokenizer(
+                text=question,
+                return_tensors="np",
+                truncation=True,
+                max_length=self.max_length,
+                padding=pad,
+            )
+            encoded_answer = tokenizer(
+                text=answer+tokenizer.eos_token,
+                return_tensors="np",
+                truncation=True,
+                max_length=self.max_length,
+                padding=pad,
+            )
+            encoded_inputs = np.concatenate([encoded_question["input_ids"],
+                                            encoded_answer["input_ids"]], axis=-1)
+            # labels have to be -100 so that the question does not affect the model's loss
+            encoded_labels = np.concatenate([np.array([-100] * encoded_question["input_ids"].shape[-1])[None, :],
+                                            encoded_answer["input_ids"]], axis=-1)
+            encoded_attention_mask = np.concatenate([encoded_question["attention_mask"],
+                                            encoded_answer["attention_mask"]], axis=-1)
+            self.total_length += encoded_inputs.shape[1]
+            self.data.append({
+                'input_ids': encoded_inputs.squeeze(0),
+                'labels': encoded_labels.squeeze(0),
+                'attention_mask': encoded_attention_mask.squeeze(0)
+            })
+        self.mean_length = self.total_length / len(list_of_question_answers)
+        logger.info(f"Mean length of tokens per window: {self.mean_length}")
+        self.pack(64)
