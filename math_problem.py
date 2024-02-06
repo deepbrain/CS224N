@@ -37,7 +37,6 @@ compare6 = f"Analyze the two solutions and choose the better one: Solution 1:\n%
 comparisons = [compare1, compare2, compare3, compare4, compare5, compare6]
 
 
-
 class Solution:
     def __init__(self, problem, model_manager, prompt, log=False):
         self.problem = problem
