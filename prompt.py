@@ -7,6 +7,7 @@ class Prompt:
             self.function_name = "problem"
         self.solution_answers = {}
         self.ground_answers = {}
+        self.steps = {}
 
     def get_function_name(self):
         return self.function_name
@@ -22,7 +23,10 @@ class Prompt:
         self.ground_answers[problem] = ground_numeric_answer
 
     def add_step_solution(self, problem, step_result):
-        self.steps[problem].append(step_result)
+        if problem in self.steps[problem]:
+            self.steps[problem].append(step_result)
+        else:
+            self.steps[problem] = [step_result]
 
     def compute_accuracy(self):
         correct = 0
