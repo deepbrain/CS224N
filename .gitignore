@@ -2,3 +2,4 @@
 testing_roberto.ipynb
 /__pycache__
 **.pkl
+/lm-evaluation-harness
