@@ -108,3 +108,32 @@ def find_unsolvable_problems(problems, prompts):
 
 def compute_oracle_accuracy(problems, prompts):
     return 1 - len(find_unsolvable_problems(problems, prompts)) / len(problems)
+
+
+
+def get_old_prompts(): #returns instances of Prompt for each of the 10 old prompts
+    function_name = "problem"
+    prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+             "       Elaborate your thinking step by step in comments before each code line below. End with return result\n"
+    prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s" + \
+              "       Add comments before each line. End with return result\n"
+    prompt3 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       Be accurate and think step by step in comments before each code line below. End with return result\n"
+    prompt4 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       Find unusual solution and comment before each of your line of code. End with return result\n"
+    prompt5 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       In your comments write an algebraic formula based on the problem, solve it algebraically, then write code to calculate the result. End with return result\n"
+    prompt6 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       Find the most elegant and correct solution. End with return result\n"
+    prompt7 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       Think step by step in comments before each code line below. End with return result"
+    prompt8 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       You must elaborate your thinking in comments below. End with return result"
+    prompt9 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              """      Is this a simple math or algebra problem? For algebra problems, you must elaborate and solve it algebraically in the comments first, then write code to calculate the result. For simple math problems, you can write code to calculate the result directly. End with return result\n"""
+    prompt10 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+               """    First, let's solve this problem using pure symbolic expressions. Elaborate with your algebraic skills below. Use x,y,z...to denote unknown variables. Use a,b,c... to denote given constants. Then write a pure python code to compute and return the result. End with return result\n    Let x be"""
+    prompt_texts = [prompt, prompt2, prompt3, prompt4, prompt5, prompt6, prompt7, prompt8, prompt9, prompt10]
+    return [Prompt(prompt_text, function_name) for prompt_text in prompt_texts]
+
+
