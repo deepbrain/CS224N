@@ -7,7 +7,7 @@ except:
 
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
+os.environ["CUDA_VISIBLE_DEVICES"] = "3" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
 
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer
@@ -28,6 +28,7 @@ from loguru import logger
 import asyncio
 from functools import partial
 from tokenized_dataset import TokenizedDataset, TokenizedQADataset
+from evaluation import evaluate_on_nlp_tasks
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 
 class MathLLM:
@@ -89,7 +90,10 @@ class MathLLM:
 
     def unload_model(self):
         if self.model is not None:
-            del self.model  # free up memory
+            # free up memory
+            del self.model
+            if hasattr(self, 'base_model') and self.base_model is not None:
+                del self.base_model
             del self.tokenizer
             torch.cuda.empty_cache()
             self.model = None
@@ -227,7 +231,7 @@ class MathLLM:
 
             training_arguments = TrainingArguments(
                 output_dir="logs",
-                num_train_epochs=4,
+                num_train_epochs=1,
                 gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
@@ -387,7 +391,7 @@ def load_data(dataset_class=TokenizedDataset):
 
     return train_data, eval_data, X_test, y_true
 
-
+@torch.no_grad()
 def evaluate(y_true, y_pred):
     labels = ['positive', 'neutral', 'negative']
     mapping = {'positive': 2, 'neutral': 1, 'none':1, 'negative': 0}
@@ -422,6 +426,7 @@ def evaluate(y_true, y_pred):
     print('\nConfusion Matrix:')
     print(conf_matrix)
 
+@torch.no_grad()
 def predict(X_test, LLM, batch_size=16):
     y_pred = []
     prompts = []
@@ -458,17 +463,21 @@ def main():
 #    logger.warning("DO NOT use quantization if your GPU has more than 10GB of memory. It is slow and can't be merged into base model.")
     LLM = MathLLM("microsoft/phi-2",  load=False, dataset_class=training_dataset_class)
     LLM.train(train_data, eval_data, "phi-2-pad2048", merge=True) # traning takes about 40 minutes on 1 A5000
+    nlp_tasks_res = evaluate_on_nlp_tasks(LLM.model, LLM.revision, limit=10)
+    logger.info(nlp_tasks_res["results"]) 
+    del nlp_tasks_res
+    LLM.unload_model()
     del LLM
     LLM = MathLLM("phi-2-pad2048-lora", load=True) #loading in lora mode
-    y_pred = predict(X_test, LLM, batch_size=128)
+    y_pred = predict(X_test, LLM, batch_size=64)
     evaluate(y_true, y_pred)
     del LLM
     LLM = MathLLM("phi-2-pad2048", load=True) #loading in regular mode
-    y_pred = predict(X_test, LLM, batch_size=128)
+    y_pred = predict(X_test, LLM, batch_size=64)
     evaluate(y_true, y_pred)
     del LLM
     LLM = MathLLM("phi-2-pad2048", use_vllm=True, load=True) #loading in vllm mode
-    y_pred = predict(X_test, LLM, batch_size=128)
+    y_pred = predict(X_test, LLM, batch_size=64)
     evaluate(y_true, y_pred)
 
 

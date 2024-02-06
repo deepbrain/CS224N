@@ -45,7 +45,7 @@ class TaskManagerValid(TaskManager):
         return task_dict
 
 @torch.no_grad()
-def evaluate_model(
+def evaluate_on_nlp_tasks(
     model,
     base_model_revision,
     max_length = 1024, # max context length
