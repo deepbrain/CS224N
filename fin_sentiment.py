@@ -412,7 +412,7 @@ def train1(train_data, eval_data, model_name = "microsoft/phi-2"):
     # revision = "accfee56d8988cae60915486310362db5831b1bd"
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto',
 #                                                 quantization_config=bnb_config,
-#                                                 attn_implementation="flash_attention_2",
+                                                 attn_implementation="flash_attention_2",
                                                  trust_remote_code=True)
 
     print("count of parameters in the model: ", count_unfrozen_params(model))

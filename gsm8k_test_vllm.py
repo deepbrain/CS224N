@@ -43,7 +43,6 @@ function_name = "problem"
 prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
          "       Elaborate your thinking step by step in comments before each code line below.\n"
 
-
 prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s" + \
          "       Add comments before each line.\n"
 

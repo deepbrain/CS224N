@@ -29,7 +29,7 @@ class ModelManager:
     def create_problems(self):
         self.problems = []
         # select 1000 random problems from the training set
-        selected_problems = np.random.choice(self.train_problems, 1000, replace=False)
+        selected_problems = np.random.choice(self.train_problems, 400, replace=False)
         self.problems = []
         for problem in selected_problems:
             question = problem['question']
@@ -53,7 +53,7 @@ class ModelManager:
         return train_samples
 
 
-    async def solve(self, prompt, max_tokens = 500, completion_only=False):
+    async def solve(self, prompt, max_tokens = 1000, completion_only=False):
         result_queue = asyncio.Queue(1)
         params = {"prompt": prompt, "max_tokens": max_tokens, "completion_only": completion_only, "result_queue": result_queue}
         self.queue.append(params)

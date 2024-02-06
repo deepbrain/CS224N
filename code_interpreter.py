@@ -1,6 +1,8 @@
 from contextlib import contextmanager
 import signal
 from loguru import logger
+import sympy
+import math
 
 INVALID_ANSWER = -99999
 
@@ -22,25 +24,33 @@ def compute_result(input_code_string, function_name):
         # Create a new, isolated namespace for each invocation
         local_namespace = {}
         # Execute the code in the string within the isolated namespace
-        exec('import math\n' +input_code_string, local_namespace)
+        exec("import math\nimport sympy\n" +input_code_string, local_namespace)
         # Assuming the function name is known and consistent
         func_name = function_name  # Adjust if the function name varies
         max_time = 3
+        error = ""
 
         if func_name in local_namespace:
             # Call the function and return the result
             with timeout(max_time, input_code_string):
                 try:
-                    return local_namespace[func_name]()
+                    res = local_namespace[func_name]()
+                    try:
+                        res = int(res)
+                    except:
+                        res = INVALID_ANSWER
+                    return res, error
                 except Exception as e:
                     logger.error(f"An error occurred: {e}")
+                    error = str(e)
                     logger.error(f"Code that caused the error: {input_code_string}")
-                    return INVALID_ANSWER
+                    return INVALID_ANSWER, error
         else:
             # Function name not found
-            return INVALID_ANSWER
+            return INVALID_ANSWER, f"Function name '{func_name}' not found in code"
     except Exception as e:
         # Handle any exception that occurs
         logger.error(f"An error occurred: {e}")
+        error = str(e)
         logger.error(f"Code that caused the error: {input_code_string}")
-        return INVALID_ANSWER
+        return INVALID_ANSWER, error

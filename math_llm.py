@@ -89,7 +89,7 @@ class MathLLM:
         tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return model, tokenizer
 
-    def process_batch_regular(self, batch, max_tokens, temperature = 0.5, top_p = 0.2, presence_penalty=0.1, frequency_penalty=0.1):
+    def process_batch_regular(self, batch, max_tokens, temperature = 0.9, top_p = 0.4, presence_penalty=0.9, frequency_penalty=0.9):
             # Tokenize the batch
             self.tokenizer.padding_side = "left"
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -117,7 +117,7 @@ class MathLLM:
 
             return decoded_outputs
 
-    def process_batch(self, batch, max_tokens, temperature = 0.5, top_p = 0.2, presence_penalty=0.1, frequency_penalty=0.1):
+    def process_batch(self, batch, max_tokens, temperature = 0.5, top_p = 0.2, presence_penalty=0.9, frequency_penalty=0.9):
            #processes a batch of prompts and returns a batch of solutions one per prompt
         # check if self.model is instance of the LLM class:
         if not isinstance(self.model, LLM):
