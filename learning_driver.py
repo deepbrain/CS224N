@@ -76,6 +76,7 @@ class ModelManager:
         train_samples = [problem.get_train_sample() for problem in self.problems]
         return train_samples
 
+
     async def get_completion(self, prompt, max_tokens = 1000, completion_only=False):
         result_queue = asyncio.Queue(1)
         params = {"prompt": prompt, "max_tokens": max_tokens, "completion_only": completion_only, "result_queue": result_queue}
