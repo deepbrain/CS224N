@@ -73,6 +73,11 @@ class Problem:
                     answer_counts[a] += 1
                 else:
                     answer_counts[a] = 1
+        if len(answer_counts) == 0:
+            self.best_answer = INVALID_ANSWER
+            self.best_solution = random.choice(self.solutions)
+            logger.error(f"No valid answers for problem: {self.question}")
+            return
         self.best_answer = max(answer_counts, key=answer_counts.get)
         best_solutions = []
         for solution in self.solutions:
