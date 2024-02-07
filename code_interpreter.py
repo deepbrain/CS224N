@@ -41,16 +41,16 @@ def compute_result(input_code_string, function_name):
                         res = INVALID_ANSWER
                     return res, error
                 except Exception as e:
-                    logger.error(f"An error occurred: {e}")
+                    #logger.error(f"An error occurred: {e}")
                     error = str(e)
-                    logger.error(f"Code that caused the error: {input_code_string}")
+                    #logger.error(f"Code that caused the error: {input_code_string}")
                     return INVALID_ANSWER, error
         else:
             # Function name not found
             return INVALID_ANSWER, f"Function name '{func_name}' not found in code"
     except Exception as e:
         # Handle any exception that occurs
-        logger.error(f"An error occurred: {e}")
+        #logger.error(f"An error occurred: {e}")
         error = str(e)
-        logger.error(f"Code that caused the error: {input_code_string}")
+        #logger.error(f"Code that caused the error: {input_code_string}")
         return INVALID_ANSWER, error

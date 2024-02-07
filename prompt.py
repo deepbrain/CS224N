@@ -1,13 +1,18 @@
 import numpy as np
 from loguru import logger
+from code_interpreter import INVALID_ANSWER
+
 class Prompt:
     def __init__(self, prompt, function_name=None):  # prompt is assumed to have the % for the problem definition
         self.prompt = prompt
         if function_name is None:
             self.function_name = "problem"
+        else:
+            self.function_name = function_name
         self.solution_answers = {}
         self.ground_answers = {}
         self.steps = {}
+        self.problems = []
 
     def get_function_name(self):
         return self.function_name
@@ -28,21 +33,27 @@ class Prompt:
         else:
             self.steps[problem] = [step_result]
 
-    def compute_accuracy(self):
+    def compute_accuracy(self, rephrasing=-1):
         correct = 0
         total = 0
         for problem in self.problems:
-            if self.solutions_answers[problem] == self.ground_answers[problem]:
+            if rephrasing != -1:
+                if problem.rephasings != rephrasing:
+                    continue
+            if self.solution_answers[problem] == self.ground_answers[problem]:
                 correct += 1
             total += 1
         return correct / total
 
 
-def compute_mean_accuracy(problems, prompts):
+def compute_mean_accuracy(problems, prompts, rephrasing=-1):
 # computes the mean accuracy of all prompts
     correct = 0
     total = 0
     for problem in problems:
+        if rephrasing != -1:
+            if problem.rephasings != rephrasing:
+                continue
         for prompt in prompts:
             if problem in prompt.problems:
                 if prompt.solution_answers[problem] == prompt.ground_answers[problem]:
@@ -51,19 +62,23 @@ def compute_mean_accuracy(problems, prompts):
     return correct / total
 
 
-def compute_majority_step_accuracy(problems, prompts):
+def compute_majority_step_accuracy(problems, prompts, rephrasing = -1):
 # computes the accuracy of the prompt that has the most repeating results in steps for each problem
     correct = 0
     for problem in problems:
+        if rephrasing != -1:
+            if problem.rephasings != rephrasing:
+                continue
         answers = {}
         for prompt in prompts:
             if problem in prompt.problems:
                 steps = prompt.steps[problem]
                 for step in steps:
-                    if step in answers:
-                        answers[step] += 1
-                    else:
-                        answers[step] = 1
+                    if step != INVALID_ANSWER:
+                        if step in answers:
+                            answers[step] += 1
+                        else:
+                            answers[step] = 1
         ranks = np.zeros(len(prompts))
         for prompt in prompts:
             for step in prompt.steps[problem]:
@@ -73,28 +88,35 @@ def compute_majority_step_accuracy(problems, prompts):
             correct += 1
     return correct / len(problems)
 
-
-def compute_majority_answer_accuracy(problems, prompts):
+def compute_majority_answer_accuracy(problems, prompts, rephrasing=-1):
     correct = 0
     for problem in problems:
+        if rephrasing != -1:
+            if problem.rephasings != rephrasing:
+                continue
         answers = {}
         for prompt in prompts:
             if problem in prompt.problems:
                 answer = prompt.solution_answers[problem]
                 ground_answer = prompt.ground_answers[problem]
-                if answer in answers:
-                    answers[answer] += 1
-                else:
-                    answers[answer] = 1
+                if answer != INVALID_ANSWER:
+                    if answer in answers:
+                        answers[answer] += 1
+                    else:
+                        answers[answer] = 1
         majority_answer = max(answers, key=answers.get)
         if majority_answer == ground_answer:
             correct += 1
     return correct / len(problems)
 
-
-def find_unsolvable_problems(problems, prompts):
+def find_unsolvable_problems(problems, prompts, rephrasing=-1):
     unsolvable = []
+    total = 0
     for problem in problems:
+        if rephrasing != -1:
+            if problem.rephasings != rephrasing:
+                continue
+        total += 1
         solved = False
         for prompt in prompts:
             if problem in prompt.problems:
@@ -103,13 +125,11 @@ def find_unsolvable_problems(problems, prompts):
                     break
         if not solved:
             unsolvable.append(problem)
-    return unsolvable
+    return unsolvable, total
 
-
-def compute_oracle_accuracy(problems, prompts):
-    return 1 - len(find_unsolvable_problems(problems, prompts)) / len(problems)
-
-
+def compute_oracle_accuracy(problems, prompts, rephrasing=-1):
+    unsolvable, total = find_unsolvable_problems(problems, prompts, rephrasing)
+    return 1 - len(unsolvable) / total
 
 def get_old_prompts(): #returns instances of Prompt for each of the 10 old prompts
     function_name = "problem"
