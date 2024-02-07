@@ -104,6 +104,8 @@ def compute_majority_answer_accuracy(problems, prompts, rephrasing=-1):
                         answers[answer] += 1
                     else:
                         answers[answer] = 1
+        if len(answers) == 0:
+            continue
         majority_answer = max(answers, key=answers.get)
         if majority_answer == ground_answer:
             correct += 1
