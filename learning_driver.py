@@ -38,6 +38,8 @@ class ModelManager:
         return self.batches
 
     async def create_problems(self):
+        if self.batch_index >= len(self.batches):
+            return []
         selected_problems = self.batches[self.batch_index]
         self.batch_index += 1
         problems = []
@@ -87,6 +89,8 @@ class ModelManager:
         asyncio.create_task(model_manager.process_queue())
         while True:
             problems = await self.create_problems()
+            if len(problems) == 0:
+                break
             train_samples = await self.generate_solutions(Solution, problems)
             self.upload_solutions(train_samples)
 
