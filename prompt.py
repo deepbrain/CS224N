@@ -27,6 +27,12 @@ class Prompt:
         self.solution_answers[problem] = solution_answer
         self.ground_answers[problem] = ground_numeric_answer
 
+    def reset_stats(self):
+        self.solution_answers = {}
+        self.ground_answers = {}
+        self.steps = {}
+        self.problems = []
+
     def add_step_solution(self, problem, step_result):
         if problem in self.steps[problem]:
             self.steps[problem].append(step_result)

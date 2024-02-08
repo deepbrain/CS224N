@@ -3,10 +3,11 @@ import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 # adjust this to the GPU you want to use:
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from loguru import logger
 import logging
 from dataset import get_examples, GSMDataset
+from tokenized_dataset import TokenizedQADataset
 from math_problem import Problem, Solution
 from math_llm import MathLLM
 import numpy as np
@@ -19,29 +20,41 @@ import random
 
 
 class ModelManager:
-    def __init__(self, model_id, batch_size=64, problem_batch_size=32):
-        self.batch_size = batch_size #inference batch size
+    def __init__(self, model_id, inference_batch_size=64, problem_batch_size=32, max_train_batches=32+4):
+        self.inference_batch_size = inference_batch_size #inference batch size
+        self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
         self.train_problems = get_examples("train")
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=True)
+        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         self.queue = deque()
-        self.shuffle_and_batch(problem_batch_size)
+        self.max_train_batches = max_train_batches
+        self.shuffle_and_batch()
         self.prompts = get_old_prompts()
         self.problems = []
+        self.test = False
 
-    def shuffle_and_batch(self, batch_size):
+
+    def shuffle_and_batch(self):
         # Shuffle the list of problems to ensure randomness
         random.shuffle(self.train_problems)
         # Split the list into batches
-        self.batches = [self.train_problems[i:i + batch_size] for i in range(0, len(self.train_problems), batch_size)]
+        self.batches = [self.train_problems[i:i + self.batch_size] for i in range(0, len(self.train_problems), self.batch_size)]
         self.batch_index = 0
+        self.test_batches = [self.test_problems[i:i + self.batch_size] for i in range(0, len(self.test_problems), self.batch_size)]
+        self.test_batch_index = 0
         return self.batches
 
     async def create_problems(self):
-        if self.batch_index >= len(self.batches):
-            return []
-        selected_problems = self.batches[self.batch_index]
-        self.batch_index += 1
+        if self.test:
+            selected_problems = self.test_batches[self.test_batch_index]
+            self.test_batch_index += 1
+            if self.test_batch_index >= len(self.test_batches):
+                return []
+        else:
+            selected_problems = self.batches[self.batch_index]
+            self.batch_index += 1
+            if self.batch_index >= len(self.batches):
+                self.batch_index = 0
         problems = []
         for problem in selected_problems:
             question = problem['question']
@@ -64,16 +77,20 @@ class ModelManager:
         majority_accuracy = compute_majority_answer_accuracy(self.problems, self.prompts)
         oracle = compute_oracle_accuracy(self.problems, self.prompts)
         unsolvable_problems = find_unsolvable_problems(self.problems, self.prompts)
-        logger.info(f"Overall mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
+        if self.test:
+            test = "test"
+        else:
+            test = "train"
+        logger.info(f"{test} overall mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
 #        for rephrasing in range(0, 5):
 #            mean_accuracy = compute_mean_accuracy(self.problems, self.prompts, rephrasing)
 #            majority_accuracy = compute_majority_answer_accuracy(self.problems, self.prompts, rephrasing)
 #            oracle = compute_oracle_accuracy(self.problems, self.prompts, rephrasing)
 #            logger.info(f"Rephrasing{rephrasing} mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
 
-        prompt_accuracies = ''
+        prompt_accuracies = test
         for i, prompt in enumerate(self.prompts):
-            prompt_accuracies += f"prompt{i}: {prompt.compute_accuracy():.2f}, "
+            prompt_accuracies += f" prompt{i}: {prompt.compute_accuracy():.2f},"
         logger.info(prompt_accuracies)
         train_samples = [problem.get_train_sample() for problem in self.problems]
         return train_samples
@@ -85,14 +102,36 @@ class ModelManager:
         self.queue.append(params)
         return await result_queue.get()
 
-    async def run(self):
-        asyncio.create_task(model_manager.process_queue())
+    async def run_test(self):
+        for prompt in self.prompts:
+            prompt.reset_stats()
+        self.problems = []
+        self.MathLLM.evaluate()
+        self.test = True
+        self.test_batch_index = 0
         while True:
             problems = await self.create_problems()
             if len(problems) == 0:
                 break
-            train_samples = await self.generate_solutions(Solution, problems)
-            self.upload_solutions(train_samples)
+            test_samples = await self.generate_solutions(Solution, problems)
+        logger.info(f"Testing complete for model{self.MathLLM.model_id}")
+        for prompt in self.prompts:
+            prompt.reset_stats()
+        self.problems = []
+        self.test = False
+
+
+    async def run(self):
+        asyncio.create_task(model_manager.process_queue())
+        for i in range(20):
+            for i in range(self.max_train_batches):
+                problems = await self.create_problems()
+                if len(problems) == 0:
+                    break
+                train_samples = await self.generate_solutions(Solution, problems)
+                self.upload_solutions(train_samples)
+            self.train()
+            await self.run_test()
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
         with open(filename, 'a', encoding='utf-8') as file:
@@ -100,13 +139,29 @@ class ModelManager:
                 serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
 
-    def load_solutions(self, filename="train_samples.txt"):
+    def load_solutions(self, filename="train_samples.txt", max_samples=2000):
         train_samples = []
         with open(filename, 'r', encoding='utf-8') as file:
             for line in file:
                 sample = json.loads(line.strip())
                 train_samples.append(sample)
+                if len(train_samples) >= max_samples:
+                    break
         return train_samples
+    def archive_solutions(self, filename="train_samples.txt"):
+        os.rename(filename, filename + '-' + self.iteration)
+
+    def train(self):
+        train_samples = self.load_solutions(max_samples = self.max_train_batches * self.batch_size)
+        samples = random.sample(train_samples, self.max_train_batches * self.batch_size)
+        samples = [[d['prompt'], d['solution']] for d in samples]
+        eval_samples = samples[self.batch_size*(self.max_train_batches-4):]
+        train_samples = samples[:self.batch_size*(self.max_train_batches-4)]
+        self.iteration = time.strftime("%Y%m%d-%H%M%S")
+        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True)
+        self.MathLLM.unload_model()
+        self.MathLLM.load_model(use_vllm=True)
+        self.archive_solutions()
 
     async def process_queue(self):
         while True:
@@ -123,7 +178,7 @@ class ModelManager:
                     batch_completion_only.append(params["completion_only"])
                     batch_result_queue.append(params["result_queue"])
                     count += 1
-                    if count == self.batch_size:
+                    if count == self.inference_batch_size:
                         break
                 solutions = await self.MathLLM.process_batch_async(batch_prompts, max(batch_max_tokens))
                 for i in range(count):

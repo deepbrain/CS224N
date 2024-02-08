@@ -7,7 +7,7 @@ except:
 
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
-os.environ["CUDA_VISIBLE_DEVICES"] = "3" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
+os.environ["CUDA_VISIBLE_DEVICES"] = "1" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
 
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer
@@ -74,8 +74,10 @@ class MathLLM:
             torch_dtype=self.torch_dtype,
         )
 
-    def load_model(self, model_name=None, base_model_revision=None):
+    def load_model(self, model_name=None, base_model_revision=None, use_vllm=None):
         self.unload_model()
+        if use_vllm is not None:
+            self.use_vllm = use_vllm
         if model_name is None:
             model_name = self.model_id
         if base_model_revision is None:
@@ -100,9 +102,9 @@ class MathLLM:
             self.tokenizer = None
 
     def load_model_vllm(self, model_name, base_model_revision):
-        model = LLM(model=model_name, revision=base_model_revision)
-        tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
-        return model, tokenizer
+        self.model = LLM(model=model_name, revision=base_model_revision)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
+        return self.model, self.tokenizer
 
     def process_batch_regular(self, batch, max_tokens, temperature = 0.9, top_p = 0.4, presence_penalty=0.9, frequency_penalty=0.9):
             # Tokenize the batch
@@ -135,6 +137,8 @@ class MathLLM:
     def process_batch(self, batch, max_tokens, temperature = 0.5, top_p = 0.2, presence_penalty=0.9, frequency_penalty=0.9):
            #processes a batch of prompts and returns a batch of solutions one per prompt
         # check if self.model is instance of the LLM class:
+        if self.model is None:
+            self.load_model(self.model_id, self.revision)
         if not isinstance(self.model, LLM):
             return self.process_batch_regular(batch, max_tokens, temperature, top_p, presence_penalty, frequency_penalty)
         sampling_params = SamplingParams(temperature=temperature, top_p=top_p, presence_penalty=presence_penalty, frequency_penalty=frequency_penalty, max_tokens=max_tokens)
@@ -184,7 +188,7 @@ class MathLLM:
         else:
             return None
 
-    def train(self, problems, eval_problems, new_model_id, lr = 2e-4, merge = False):
+    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False):
         # trains with a lora model on a batch of problems and saves the model to a new_model_id
         #  read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
 
@@ -203,10 +207,13 @@ class MathLLM:
             base_tokenizer.pad_token = base_tokenizer.eos_token
             base_tokenizer.padding_side = "right"
 
+
             train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
             eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
 
+
             base_model.config.use_cache = False
+            base_model.config.eos_token_id = base_tokenizer.eos_token_id
             base_model.config.pretraining_tp = 1
 
             # gradient checkpointing to save memory
@@ -235,13 +242,13 @@ class MathLLM:
                 gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=1,  # 4
+                gradient_accumulation_steps=8,  # 4
                 optim="paged_adamw_32bit",
                 adam_beta1=0.9, #--------
                 adam_beta2=0.95, #-----------
                 save_steps=0,
                 logging_steps=1,
-                learning_rate=7e-4,
+                learning_rate=lr,
                 weight_decay=0.01,
                 fp16 = False,
                 bf16 = False,
@@ -284,6 +291,16 @@ class MathLLM:
                     logger.warning("Merging is not supported in quantization mode")
                 self.merge_lora()
 
+    def evaluate(self):
+        if isinstance(self.model, LLM):
+            self.unload_model()
+        if self.model is None:
+            self.model, self.tokenizer = self.load_model_regular(self.model_id, self.revision)
+        nlp_tasks_res = evaluate_on_nlp_tasks(self.model, self.revision, limit=300)
+        logger.info(nlp_tasks_res["results"])
+        del nlp_tasks_res
+        self.unload_model()
+
 
     def merge_lora(self):
         # merges the lora model into its base model and saves it into a new model_id without the suffix -lora
@@ -299,7 +316,8 @@ class MathLLM:
         self.tokenizer.save_pretrained(new_model_id)
         del merged_model
         self.model_id = new_model_id
-        self.load_model(new_model_id, self.revision)
+        self.unload_model()
+#        self.load_model(new_model_id, self.revision)
 
 
 

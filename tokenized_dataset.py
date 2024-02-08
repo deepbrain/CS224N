@@ -29,7 +29,8 @@ class TokenizedDataset(Dataset):
             })
         self.mean_length = self.total_length / len(list_of_strings)
         logger.info(f"Mean length of tokens per window: {self.mean_length}")
-        self.pack(64)
+        self.packed_data = self.data.copy()
+        #self.pack(64)
 
 
     def pack(self, N):
@@ -83,13 +84,13 @@ class TokenizedDataset(Dataset):
         return len(self.packed_data)
 
     def __getitem__(self, idx):
-        self.total_calls += 1
-        if self.total_calls > len(self.packed_data):
-            prev_len = len(self.packed_data)
-            self.pack(64)
-            while len(self.packed_data) < prev_len:
-                idx = random.randint(0, len(self.packed_data) - 1)
-                self.packed_data.append(self.packed_data[idx])
+        #self.total_calls += 1
+        #if self.total_calls > len(self.packed_data):
+        #    prev_len = len(self.packed_data)
+        #    self.pack(64)
+        #    while len(self.packed_data) < prev_len:
+        #        idx = random.randint(0, len(self.packed_data) - 1)
+        #        self.packed_data.append(self.packed_data[idx])
         return self.packed_data[idx]
 
 class TokenizedQADataset(TokenizedDataset):
@@ -138,4 +139,6 @@ class TokenizedQADataset(TokenizedDataset):
             })
         self.mean_length = self.total_length / len(list_of_question_answers)
         logger.info(f"Mean length of tokens per window: {self.mean_length}")
-        self.pack(64)
+        self.packed_data = self.data.copy()
+
+        #self.pack(64)
