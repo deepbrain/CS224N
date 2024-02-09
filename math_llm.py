@@ -7,7 +7,7 @@ except:
 
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" #unfortunately, this is necessary to define here to prevent the model from crashing when loading
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 from peft import LoraConfig, PeftConfig
 from trl import SFTTrainer

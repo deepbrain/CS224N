@@ -1,9 +1,11 @@
 #prevent the local variables from being imported into the remote environment as they can cuase crashes
+from multiprocessing import Process, Queue
+import multiprocessing as mp
 import os
 if 'LIBRARY_ROOTS' in os.environ:
     del os.environ['LIBRARY_ROOTS']
 # adjust this to the GPU you want to use:
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from loguru import logger
 import logging
 from dataset import get_examples, GSMDataset
@@ -20,28 +22,29 @@ import random
 
 
 class ModelManager:
-    def __init__(self, model_id, inference_batch_size=32, problem_batch_size=32, max_train_batches=4+4):
+    def __init__(self, model_id, start_from = 0, num_samples = 1024, inference_batch_size=32, problem_batch_size=32, max_train_batches=4+4):
         self.inference_batch_size = inference_batch_size #inference batch size
         self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
         self.train_problems = get_examples("train")
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=True, dataset_class=TokenizedQADataset)
+        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         self.queue = deque()
         self.max_train_batches = max_train_batches
-        self.shuffle_and_batch()
+        self.shuffle_and_batch(start_from, num_samples)
         self.prompts = get_old_prompts()
         self.problems = []
         self.test = False
         self.learning_iteration = 0
 
 
-    def shuffle_and_batch(self):
+    def shuffle_and_batch(self, start_from, num_samples):
         # Shuffle the list of problems to ensure randomness
         #set the random seed to ensure reproducibility
         random.seed(0)
         random.shuffle(self.train_problems)
         # Split the list into batches
-        self.batches = [self.train_problems[i:i + self.batch_size] for i in range(0, len(self.train_problems), self.batch_size)]
+        train_problems = self.train_problems[start_from:start_from+num_samples]
+        self.batches = [self.train_problems[i:i + self.batch_size] for i in range(0, len(train_problems), self.batch_size)]
         self.batch_index = 0
         self.test_batches = [self.test_problems[i:i + self.batch_size] for i in range(0, len(self.test_problems), self.batch_size)]
         self.test_batch_index = 0
@@ -49,15 +52,15 @@ class ModelManager:
 
     async def create_problems(self):
         if self.test:
-            selected_problems = self.test_batches[self.test_batch_index]
-            self.test_batch_index += 1
             if self.test_batch_index >= len(self.test_batches):
                 return []
+            selected_problems = self.test_batches[self.test_batch_index]
+            self.test_batch_index += 1
         else:
+            if self.batch_index >= len(self.batches):
+                return []
             selected_problems = self.batches[self.batch_index]
             self.batch_index += 1
-            if self.batch_index >= len(self.batches):
-                self.batch_index = 0
         problems = []
         for problem in selected_problems:
             question = problem['question']
@@ -124,18 +127,37 @@ class ModelManager:
         self.test = False
 
 
-    async def run(self):
-        asyncio.create_task(model_manager.process_queue())
-        for learning in range(20):
-            self.learning_iteration = learning
+    async def run_inference(self, iteration, do_test): #this code will execute in separate process
+        asyncio.create_task(self.process_queue())
+        self.learning_iteration = iteration
+        if do_test:
+            await self.run_test()
+        while True:
+            problems = await self.create_problems()
+            if len(problems) == 0:
+                break
+            train_samples = await self.generate_solutions(Solution, problems)
+            self.upload_solutions(train_samples)
+
+    def spawn_inference(self, start_from, num_samples, iteration, do_test, GPU=-1):
+        MPqueue = Queue()
+        if GPU != -1:
+            bkp = os.environ["CUDA_VISIBLE_DEVICES"]
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
+        p = Process(target=run_inference, args=(self.MathLLM.model_id, start_from, num_samples, iteration, do_test, MPqueue))
+        p.start()
+        p.join()
+        if GPU != -1:
+            os.environ["CUDA_VISIBLE_DEVICES"] = bkp
+        return MPqueue.get()
+
+    def run_training(self):
+        start_from = 0
+        for i in range(100):
+            self.MathLLM.unload_model()
+            self.spawn_inference(start_from, num_samples=32, iteration=i, do_test=i != 0, GPU=-1)
+            start_from += 1024
             self.train()
-            for i in range(1):
-                problems = await self.create_problems()
-                if len(problems) == 0:
-                    break
-                train_samples = await self.generate_solutions(Solution, problems)
-                self.upload_solutions(train_samples)
-            await self.run_test(i)
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
         with open(filename, 'a', encoding='utf-8') as file:
@@ -167,8 +189,6 @@ class ModelManager:
         del self.MathLLM
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True)
-        self.MathLLM.unload_model()
-        self.MathLLM.load_model(use_vllm=True)
         self.archive_solutions()
 
     async def process_queue(self):
@@ -197,10 +217,18 @@ class ModelManager:
             else:
                 await asyncio.sleep(0.1)
 
+def run_inference(model_name, start_from, num_samples, iteration, do_test, MPqueue):
+    model_manager = ModelManager(model_name, start_from, num_samples)
+    asyncio.run(model_manager.run_inference(iteration, do_test))
+    MPqueue.put("done")
+
+
+
 
 if __name__ == '__main__':
+    mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     model_manager = ModelManager("microsoft/phi-2")
     #run the process_queue method in the background
-    asyncio.run(model_manager.run())
+    asyncio.run(model_manager.run_training())
