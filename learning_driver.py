@@ -128,13 +128,13 @@ class ModelManager:
         asyncio.create_task(model_manager.process_queue())
         for learning in range(20):
             self.learning_iteration = learning
+            self.train()
             for i in range(1):
                 problems = await self.create_problems()
                 if len(problems) == 0:
                     break
                 train_samples = await self.generate_solutions(Solution, problems)
                 self.upload_solutions(train_samples)
-            self.train()
             await self.run_test(i)
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
@@ -168,7 +168,7 @@ class ModelManager:
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True)
         self.MathLLM.unload_model()
-        self.MathLLM.load_model(use_vllm=False)
+        self.MathLLM.load_model(use_vllm=True)
         self.archive_solutions()
 
     async def process_queue(self):
