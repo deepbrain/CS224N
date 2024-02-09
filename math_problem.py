@@ -3,7 +3,6 @@ from loguru import logger
 from code_interpreter import compute_result, INVALID_ANSWER
 import asyncio
 import random
-from prompts.prompt_generators import get_all_prompts
 import re
 
 class Solution:
