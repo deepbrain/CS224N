@@ -22,7 +22,7 @@ import random
 
 
 class ModelManager:
-    def __init__(self, model_id, start_from = 0, num_samples = 1024, inference_batch_size=32, problem_batch_size=32, max_train_batches=4+4):
+    def __init__(self, model_id, start_from = 0, num_samples = 1024, inference_batch_size=32, problem_batch_size=32, max_train_batches=32+4):
         self.inference_batch_size = inference_batch_size #inference batch size
         self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
@@ -153,10 +153,12 @@ class ModelManager:
 
     def run_training(self):
         start_from = 0
+        inference_batch_size = 1024
         for i in range(100):
+            do_test = True #i != 0
             self.MathLLM.unload_model()
-            self.spawn_inference(start_from, num_samples=32, iteration=i, do_test=i != 0, GPU=-1)
-            start_from += 1024
+            self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
+            start_from += inference_batch_size
             self.train()
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
