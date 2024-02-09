@@ -140,5 +140,4 @@ class TokenizedQADataset(TokenizedDataset):
         self.mean_length = self.total_length / len(list_of_question_answers)
         logger.info(f"Mean length of tokens per window: {self.mean_length}")
         self.packed_data = self.data.copy()
-
         #self.pack(64)

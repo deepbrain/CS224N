@@ -20,22 +20,25 @@ import random
 
 
 class ModelManager:
-    def __init__(self, model_id, inference_batch_size=64, problem_batch_size=32, max_train_batches=32+4):
+    def __init__(self, model_id, inference_batch_size=32, problem_batch_size=32, max_train_batches=4+4):
         self.inference_batch_size = inference_batch_size #inference batch size
         self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
         self.train_problems = get_examples("train")
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
+        self.MathLLM = MathLLM(model_id, use_vllm=True, load=True, dataset_class=TokenizedQADataset)
         self.queue = deque()
         self.max_train_batches = max_train_batches
         self.shuffle_and_batch()
         self.prompts = get_old_prompts()
         self.problems = []
         self.test = False
+        self.learning_iteration = 0
 
 
     def shuffle_and_batch(self):
         # Shuffle the list of problems to ensure randomness
+        #set the random seed to ensure reproducibility
+        random.seed(0)
         random.shuffle(self.train_problems)
         # Split the list into batches
         self.batches = [self.train_problems[i:i + self.batch_size] for i in range(0, len(self.train_problems), self.batch_size)]
@@ -78,9 +81,9 @@ class ModelManager:
         oracle = compute_oracle_accuracy(self.problems, self.prompts)
         unsolvable_problems = find_unsolvable_problems(self.problems, self.prompts)
         if self.test:
-            test = "test"
+            test = "test " + str(self.learning_iteration)
         else:
-            test = "train"
+            test = "train " + str(self.learning_iteration)
         logger.info(f"{test} overall mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
 #        for rephrasing in range(0, 5):
 #            mean_accuracy = compute_mean_accuracy(self.problems, self.prompts, rephrasing)
@@ -92,7 +95,7 @@ class ModelManager:
         for i, prompt in enumerate(self.prompts):
             prompt_accuracies += f" prompt{i}: {prompt.compute_accuracy():.2f},"
         logger.info(prompt_accuracies)
-        train_samples = [problem.get_train_sample() for problem in self.problems]
+        train_samples = [problem.get_train_sample() for problem in problems]
         return train_samples
 
 
@@ -123,15 +126,16 @@ class ModelManager:
 
     async def run(self):
         asyncio.create_task(model_manager.process_queue())
-        for i in range(20):
-            for i in range(self.max_train_batches):
+        for learning in range(20):
+            self.learning_iteration = learning
+            for i in range(1):
                 problems = await self.create_problems()
                 if len(problems) == 0:
                     break
                 train_samples = await self.generate_solutions(Solution, problems)
                 self.upload_solutions(train_samples)
             self.train()
-            await self.run_test()
+            await self.run_test(i)
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
         with open(filename, 'a', encoding='utf-8') as file:
@@ -158,9 +162,13 @@ class ModelManager:
         eval_samples = samples[self.batch_size*(self.max_train_batches-4):]
         train_samples = samples[:self.batch_size*(self.max_train_batches-4)]
         self.iteration = time.strftime("%Y%m%d-%H%M%S")
+        model_id = self.MathLLM.model_id
+        self.MathLLM.unload_model()
+        del self.MathLLM
+        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True)
         self.MathLLM.unload_model()
-        self.MathLLM.load_model(use_vllm=True)
+        self.MathLLM.load_model(use_vllm=False)
         self.archive_solutions()
 
     async def process_queue(self):

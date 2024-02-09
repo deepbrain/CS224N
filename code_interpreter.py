@@ -21,6 +21,13 @@ def timeout(duration, program):
 
 def compute_result(input_code_string, function_name):
     try:
+        modified_name = function_name + "_modified5765765" #new name to prevent recursion
+        lines = input_code_string.split("\n")
+        for i in range(len(lines)):
+            if function_name in lines[i]:
+                lines[i] = lines[i].replace(function_name, modified_name)
+                break
+        input_code_string = "\n".join(lines)
         # Create a new, isolated namespace for each invocation
         local_namespace = {}
         # Execute the code in the string within the isolated namespace
@@ -30,11 +37,11 @@ def compute_result(input_code_string, function_name):
         max_time = 3
         error = ""
 
-        if func_name in local_namespace:
+        if modified_name in local_namespace:
             # Call the function and return the result
             with timeout(max_time, input_code_string):
                 try:
-                    res = local_namespace[func_name]()
+                    res = local_namespace[modified_name]()
                     try:
                         res = int(res)
                     except:

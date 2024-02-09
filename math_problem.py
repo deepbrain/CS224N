@@ -15,6 +15,7 @@ class Solution:
     async def solve(self):
         self.initial_prompt = self.prompt.get_prompt() % self.problem.question
         self.solution = await self.model_manager.get_completion(self.initial_prompt, max_tokens=1000, completion_only=True)
+#        logger.info(f"Solving problem: " + self.initial_prompt+self.get_train_solution())
         self.answer, error = compute_result(self.initial_prompt+self.get_train_solution(), self.prompt.get_function_name())
         if error != "":
             self.answer = INVALID_ANSWER

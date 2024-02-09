@@ -20,8 +20,8 @@ from transformers import (AutoModelForCausalLM,
 import transformers
 print('Using transformers version: ' + transformers.__version__)
 from vllm import LLM, SamplingParams
-
-from peft import prepare_model_for_kbit_training
+import gc
+from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from peft import LoraConfig, get_peft_model, PeftModel
 import torch
 from loguru import logger
@@ -30,6 +30,8 @@ from functools import partial
 from tokenized_dataset import TokenizedDataset, TokenizedQADataset
 from evaluation import evaluate_on_nlp_tasks
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
+from numba import cuda
+
 
 class MathLLM:
     def __init__(
@@ -68,7 +70,7 @@ class MathLLM:
             load_in_8bit=False,
             return_dict=True,
             do_sample=True,
-            device_map="auto",
+            device_map={'': 0},
 #            attn_implementation="flash_attention_2",
             quantization_config=self.get_bnbs_config(),
             torch_dtype=self.torch_dtype,
@@ -93,9 +95,14 @@ class MathLLM:
     def unload_model(self):
         if self.model is not None:
             # free up memory
-            del self.model
-            if hasattr(self, 'base_model') and self.base_model is not None:
-                del self.base_model
+            if isinstance(self.model, LLM):
+                del self.model
+                gc.collect()
+                torch.cuda.empty_cache()
+            else:
+                if hasattr(self, 'base_model') and self.base_model is not None:
+                    del self.base_model
+                    self.base_model = None
             del self.tokenizer
             torch.cuda.empty_cache()
             self.model = None
@@ -106,7 +113,7 @@ class MathLLM:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return self.model, self.tokenizer
 
-    def process_batch_regular(self, batch, max_tokens, temperature = 0.9, top_p = 0.4, presence_penalty=0.9, frequency_penalty=0.9):
+    def process_batch_regular(self, batch, max_tokens, temperature = 0.2, top_p = 0.2, presence_penalty=1, frequency_penalty=1):
             # Tokenize the batch
             self.tokenizer.padding_side = "left"
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -127,7 +134,8 @@ class MathLLM:
             if hasattr(self.model.config, 'frequency_penalty'):
                 gen_args['frequency_penalty'] = frequency_penalty
 
-            outputs = self.model.generate(**inputs, **gen_args)
+            with torch.no_grad():
+                outputs = self.model.generate(**inputs, **gen_args)
 
             # Decode the generated tokens
             decoded_outputs = [self.tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
