@@ -1,5 +1,6 @@
 import numpy as np
 from loguru import logger
+from prompts.prompt_generators import get_all_generated_prompts
 from code_interpreter import INVALID_ANSWER
 
 class Prompt:
@@ -164,4 +165,9 @@ def get_old_prompts(): #returns instances of Prompt for each of the 10 old promp
     prompt_texts = [prompt, prompt2, prompt3, prompt4, prompt5, prompt6, prompt7, prompt8, prompt9, prompt10]
     return [Prompt(prompt_text, function_name) for prompt_text in prompt_texts]
 
-
+def get_all_prompts():
+    function_name = "problem"
+    old_prompts = get_old_prompts()
+    new_prompt_strings = get_all_generated_prompts("%s\n")
+    new_prompts = [Prompt(prompt_text, function_name) for prompt_text in new_prompt_strings]
+    return old_prompts + new_prompts
