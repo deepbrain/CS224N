@@ -87,7 +87,7 @@ class ModelManager:
             test = "test " + str(self.learning_iteration)
         else:
             test = "train " + str(self.learning_iteration)
-        logger.info(f"{test} overall mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
+        logger.info(f"{test} all prompts mean accuracy: {mean_accuracy:.2f}, Majority accuracy: {majority_accuracy:.2f}, Oracle accuracy: {oracle:.2f}, problems solved: {len(self.problems)}")
 #        for rephrasing in range(0, 5):
 #            mean_accuracy = compute_mean_accuracy(self.problems, self.prompts, rephrasing)
 #            majority_accuracy = compute_majority_answer_accuracy(self.problems, self.prompts, rephrasing)

@@ -164,4 +164,3 @@ def get_old_prompts(): #returns instances of Prompt for each of the 10 old promp
     prompt_texts = [prompt, prompt2, prompt3, prompt4, prompt5, prompt6, prompt7, prompt8, prompt9, prompt10]
     return [Prompt(prompt_text, function_name) for prompt_text in prompt_texts]
 
-
