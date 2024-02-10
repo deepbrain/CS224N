@@ -109,6 +109,7 @@ class ModelManager:
         return await result_queue.get()
 
     async def run_test(self):
+        self.lock = asyncio.Lock()
         for prompt in self.prompts:
             prompt.reset_stats()
         self.problems = []
@@ -128,6 +129,7 @@ class ModelManager:
 
 
     async def run_inference(self, iteration, do_test): #this code will execute in separate process
+        self.lock = asyncio.Lock()
         asyncio.create_task(self.process_queue())
         self.learning_iteration = iteration
         if do_test:
@@ -152,13 +154,16 @@ class ModelManager:
         return MPqueue.get()
 
     def run_training(self):
-        start_from = 0
+        self.lock = asyncio.Lock()
+        start_from = 1024
         inference_batch_size = 1024
         for i in range(100):
-            do_test = True #i != 0
+            do_test = i != 0
             self.MathLLM.unload_model()
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
             start_from += inference_batch_size
+            if start_from > (len(self.train_problems) - inference_batch_size):
+                start_from = 0
             self.train()
 
     def upload_solutions(self, train_samples, filename = "train_samples.txt"):
@@ -181,10 +186,10 @@ class ModelManager:
 
     def train(self):
         train_samples = self.load_solutions(max_samples = self.max_train_batches * self.batch_size)
-        samples = random.sample(train_samples, self.max_train_batches * self.batch_size)
+        samples = random.sample(train_samples, len(train_samples))
         samples = [[d['prompt'], d['solution']] for d in samples]
-        eval_samples = samples[self.batch_size*(self.max_train_batches-4):]
-        train_samples = samples[:self.batch_size*(self.max_train_batches-4)]
+        eval_samples = samples[len(samples)-self.batch_size*2:]
+        train_samples = samples[:len(samples)-self.batch_size*2]
         self.iteration = time.strftime("%Y%m%d-%H%M%S")
         model_id = self.MathLLM.model_id
         self.MathLLM.unload_model()
@@ -220,6 +225,8 @@ class ModelManager:
                 await asyncio.sleep(0.1)
 
 def run_inference(model_name, start_from, num_samples, iteration, do_test, MPqueue):
+    logger.add("learning.log", rotation = "100 MB")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     model_manager = ModelManager(model_name, start_from, num_samples)
     asyncio.run(model_manager.run_inference(iteration, do_test))
     MPqueue.put("done")
@@ -231,6 +238,6 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager("microsoft/phi-2")
+    model_manager = ModelManager("trained_iter_20240209-115306")
     #run the process_queue method in the background
     asyncio.run(model_manager.run_training())

@@ -26,7 +26,8 @@ def compute_result(input_code_string, function_name):
         for i in range(len(lines)):
             if function_name in lines[i]:
                 lines[i] = lines[i].replace(function_name, modified_name)
-                break
+            if "while True" in lines[i]:
+                return INVALID_ANSWER, "Infinite loop detected"
         input_code_string = "\n".join(lines)
         # Create a new, isolated namespace for each invocation
         local_namespace = {}

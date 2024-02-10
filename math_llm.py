@@ -109,7 +109,7 @@ class MathLLM:
             self.tokenizer = None
 
     def load_model_vllm(self, model_name, base_model_revision):
-        self.model = LLM(model=model_name, revision=base_model_revision)
+        self.model = LLM(model=model_name, revision=base_model_revision, gpu_memory_utilization=0.75)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return self.model, self.tokenizer
 

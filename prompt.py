@@ -1,6 +1,6 @@
 import numpy as np
 from loguru import logger
-from prompts.prompt_generators import get_all_generated_prompts
+#from prompts.prompt_generators import get_all_generated_prompts
 from code_interpreter import INVALID_ANSWER
 
 class Prompt:
