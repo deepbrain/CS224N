@@ -38,7 +38,7 @@ def compute_result(prompt_string, output_string, function_name, should_crop_solu
         for i in range(len(lines)):
             if function_name in lines[i]:
                 lines[i] = lines[i].replace(function_name, modified_name)
-                break
+                # no break needed since we are changing the function name on the prompt
         prompt_string = "\n".join(lines)
 
         # potentially crop solution
