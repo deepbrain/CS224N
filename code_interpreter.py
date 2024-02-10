@@ -19,16 +19,40 @@ def timeout(duration, program):
     signal.alarm(0)
 
 
-def compute_result(input_code_string, function_name):
+def crop_solution(out):
+    # Crops solution such that the last function in the output code is the one containing the solution.
+    # This is particularly useful for few-shot prompts, where the model just keeps generating
+    # mode problems and their solutions afterwards.
+    out = out + "\n" 
+    s = out.find("\n    return")
+    e = out.find("\n", s+1)
+    if e == -1:
+        return out
+    return out[:e]
+
+def compute_result(prompt_string, output_string, function_name, should_crop_solution=True):
     try:
+        # fix recursion
         modified_name = function_name + "_modified5765765" #new name to prevent recursion
-        lines = input_code_string.split("\n")
+        lines = prompt_string.split("\n")
         for i in range(len(lines)):
             if function_name in lines[i]:
                 lines[i] = lines[i].replace(function_name, modified_name)
+        prompt_string = "\n".join(lines)
+
+        lines = output_string.split("\n") # prompt string contains the function
+        for i in range(len(lines)):
             if "while True" in lines[i]:
-                return INVALID_ANSWER, "Infinite loop detected"
-        input_code_string = "\n".join(lines)
+                lines[i] = lines[i].replace("while True", "for i in range(1)")
+        output_string = "\n".join(lines)
+
+        # potentially crop solution
+        if should_crop_solution:
+            output_string = crop_solution(output_string)
+
+        # concatenate prompt and code solution
+        input_code_string = prompt_string + output_string
+
         # Create a new, isolated namespace for each invocation
         local_namespace = {}
         # Execute the code in the string within the isolated namespace
@@ -62,3 +86,42 @@ def compute_result(input_code_string, function_name):
         error = str(e)
         #logger.error(f"Code that caused the error: {input_code_string}")
         return INVALID_ANSWER, error
+
+
+test_code = """def problem() -> int:
+    # Solution 1
+    # We can use a while loop to keep track of the time and the state of the bulbs.
+    # We initialize the time to 0 and the states to 0, 0, 0.
+    # We then use a while loop to increment the time by 1 and check if all three bulbs are on.
+    # If they are, we return the time.
+    # If not, we update the states of the bulbs based on their intervals and continue the loop.
+    # This solution has a time complexity of O(n) where n is the maximum interval of the bulbs.
+    time = 0
+    states = [0, 0, 0]
+    while True:
+        time += 1
+        for i in range(3):
+            if states[i] == 0:
+                states[i] = time % (2, 3, 4)[i]
+        if all(state == 0 for state in states):
+            return time
+    # Solution 2
+    # We can use a list comprehension to generate all possible combinations of states for the bulbs.
+    # We then use another list comprehension to filter out the combinations where all three bulbs are off.
+    # Finally, we return the minimum time from the remaining combinations.
+    # This solution has a time complexity of O(n^2) where n is the maximum interval of the bulbs.
+    intervals = [2, 3, 4]
+    states = [[0, 0, 0]]
+    for interval in intervals:
+        new_states = []
+        for state in states:
+            for i in range(3):
+                new_state = state[:]
+                new_state[i] = (new_state[i] + interval) % interval
+                new_states.append(new_state)
+        states = new_states
+    return min(time for state in states if all(state) for time in range(1, max(intervals) + 1))"""
+
+if __name__ == "__main__":
+    # test case
+    print(compute_result("", test_code, "problem"))

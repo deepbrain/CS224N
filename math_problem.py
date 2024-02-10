@@ -3,7 +3,6 @@ from loguru import logger
 from code_interpreter import compute_result, INVALID_ANSWER
 import asyncio
 import random
-#from prompts.prompt_generators import get_all_prompts
 import re
 
 class Solution:
@@ -16,13 +15,18 @@ class Solution:
         self.initial_prompt = self.prompt.get_prompt() % self.problem.question
         self.solution = await self.model_manager.get_completion(self.initial_prompt, max_tokens=1000, completion_only=True)
 #        logger.info(f"Solving problem: " + self.initial_prompt+self.get_train_solution())
-        self.answer, error = await compute_result(self.initial_prompt+self.get_train_solution(), self.prompt.get_function_name(), self.model_manager.lock)
+        self.answer, error = compute_result(
+            self.initial_prompt,
+            self.get_train_solution(),
+            self.prompt.get_function_name(),
+            should_crop_solution=True,
+        )
         if error != "":
             self.answer = INVALID_ANSWER
         self.prompt.add_solution(self.problem, self.problem.ground_numeric_answer, self.answer)
         return self.answer
     def get_train_prompt(self):
-        return self.initial_prompt
+        return self.prompt.get_train_prompt() % self.problem.question
 
     def get_train_solution(self):
         s = self.solution
