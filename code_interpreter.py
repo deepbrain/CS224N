@@ -19,15 +19,35 @@ def timeout(duration, program):
     signal.alarm(0)
 
 
-def compute_result(input_code_string, function_name):
+def crop_solution(out):
+    # Crops solution such that the last function in the output code is the one containing the solution.
+    # This is particularly useful for few-shot prompts, where the model just keeps generating
+    # mode problems and their solutions afterwards.
+    out = out + "\n" 
+    s = out.find("\n    return")
+    e = out.find("\n", s+1)
+    if e == -1:
+        return out
+    return out[:e]
+
+def compute_result(prompt_string, output_string, function_name, should_crop_solution=True):
     try:
+        # fix recursion
         modified_name = function_name + "_modified5765765" #new name to prevent recursion
-        lines = input_code_string.split("\n")
+        lines = prompt_string.split("\n") # prompt string contains the function
         for i in range(len(lines)):
             if function_name in lines[i]:
                 lines[i] = lines[i].replace(function_name, modified_name)
                 break
-        input_code_string = "\n".join(lines)
+        prompt_string = "\n".join(lines)
+
+        # potentially crop solution
+        if should_crop_solution:
+            output_string = crop_solution(output_string)
+
+        # concatenate prompt and code solution
+        input_code_string = prompt_string + output_string
+
         # Create a new, isolated namespace for each invocation
         local_namespace = {}
         # Execute the code in the string within the isolated namespace
