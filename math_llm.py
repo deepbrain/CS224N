@@ -113,7 +113,7 @@ class MathLLM:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return self.model, self.tokenizer
 
-    def process_batch_regular(self, batch, max_tokens, temperature = 0.2, top_p = 0.2, presence_penalty=1, frequency_penalty=1):
+    def process_batch_regular(self, batch, max_tokens, temperature = 0.1, top_p = 0.1, presence_penalty=1, frequency_penalty=1):
             # Tokenize the batch
             self.tokenizer.padding_side = "left"
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -142,7 +142,7 @@ class MathLLM:
 
             return decoded_outputs
 
-    def process_batch(self, batch, max_tokens, temperature = 0.5, top_p = 0.2, presence_penalty=0.9, frequency_penalty=0.9):
+    def process_batch(self, batch, max_tokens, temperature = 0.1, top_p = 0.1, presence_penalty=0.5, frequency_penalty=0.5):
            #processes a batch of prompts and returns a batch of solutions one per prompt
         # check if self.model is instance of the LLM class:
         if self.model is None:
@@ -211,10 +211,17 @@ class MathLLM:
             self.unload_model()
 
             base_model = self.load_base_model(base_model_id, base_model_revision)
-            base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=True)
-            base_tokenizer.pad_token = base_tokenizer.eos_token
+            base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=False)
+            #base_tokenizer.pad_token = base_tokenizer.eos_token
             base_tokenizer.padding_side = "right"
 
+            #base_tokenizer.add_tokens(["<|endoftext|>"])
+
+#            base_tokenizer.pad_token = "<PAD>"
+            #base_tokenizer.add_special_tokens(dict(eos_token="<|endoftext|>"))
+            base_model.config.eos_token_id = base_tokenizer.eos_token_id
+
+            base_tokenizer.pad_token = base_tokenizer.eos_token
 
             train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
             eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
@@ -238,6 +245,7 @@ class MathLLM:
                     'fc1',
                     'fc2',
                 ],  # print(model) will show the modules to use
+                modules_to_save=["embed_tokens", "lm_head"],
                 bias="none",
                 lora_dropout=0.1,
                 task_type="CAUSAL_LM",
@@ -252,12 +260,12 @@ class MathLLM:
                 per_device_eval_batch_size=1,
                 gradient_accumulation_steps=8,  # 4
                 optim="paged_adamw_32bit",
-                adam_beta1=0.9, #--------
-                adam_beta2=0.95, #-----------
+                #adam_beta1=0.9, #--------
+                #adam_beta2=0.95, #-----------
                 save_steps=0,
                 logging_steps=1,
                 learning_rate=lr,
-                weight_decay=0.01,
+                weight_decay=0.03,
                 fp16 = False,
                 bf16 = False,
 #                fp16=not self.HAS_BFLOAT16,

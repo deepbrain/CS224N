@@ -11,7 +11,7 @@ import logging
 from dataset import get_examples, GSMDataset
 from tokenized_dataset import TokenizedQADataset
 from math_problem import Problem, Solution
-from math_llm import MathLLM
+from math_llm import MathLLM, BASE_PHI_REVISION
 import numpy as np
 import asyncio
 from collections import deque
@@ -27,7 +27,8 @@ class ModelManager:
         self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
         self.train_problems = get_examples("train")
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
+        self.model_id = model_id
+        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
         self.queue = deque()
         self.max_train_batches = max_train_batches
         self.shuffle_and_batch(start_from, num_samples)
@@ -99,7 +100,10 @@ class ModelManager:
             prompt_accuracies += f" prompt{i}: {prompt.compute_accuracy():.2f},"
         logger.info(prompt_accuracies)
         train_samples = [problem.get_train_sample() for problem in problems]
-        return train_samples
+        all_samples = []
+        for problem in problems:
+            all_samples.extend(problem.get_all_samples())
+        return train_samples, all_samples
 
 
     async def get_completion(self, prompt, max_tokens = 1000, completion_only=False):
@@ -138,37 +142,53 @@ class ModelManager:
             problems = await self.create_problems()
             if len(problems) == 0:
                 break
-            train_samples = await self.generate_solutions(Solution, problems)
-            self.upload_solutions(train_samples)
+            train_samples, all_samples = await self.generate_solutions(Solution, problems)
+            self.upload_solutions(train_samples, all_samples)
 
     def spawn_inference(self, start_from, num_samples, iteration, do_test, GPU=-1):
         MPqueue = Queue()
         if GPU != -1:
             bkp = os.environ["CUDA_VISIBLE_DEVICES"]
             os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        p = Process(target=run_inference, args=(self.MathLLM.model_id, start_from, num_samples, iteration, do_test, MPqueue))
+        p = Process(target=run_inference, args=(self.model_id, start_from, num_samples, iteration, do_test, MPqueue))
         p.start()
         p.join()
         if GPU != -1:
             os.environ["CUDA_VISIBLE_DEVICES"] = bkp
         return MPqueue.get()
 
-    def run_training(self):
+    def spawn_training(self, GPU=-1):
+        MPqueue = Queue()
+        if GPU != -1:
+            bkp = os.environ["CUDA_VISIBLE_DEVICES"]
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
+        p = Process(target=run_training, args=(self.MathLLM.model_id, MPqueue))
+        p.start()
+        p.join()
+        if GPU != -1:
+            os.environ["CUDA_VISIBLE_DEVICES"] = bkp
+        return MPqueue.get()
+
+
+    def run(self):
         self.lock = asyncio.Lock()
-        start_from = 1024
+        start_from = 0
         inference_batch_size = 1024
         for i in range(100):
-            do_test = i != 0
-            self.MathLLM.unload_model()
+            do_test = True#i != 0
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
             start_from += inference_batch_size
             if start_from > (len(self.train_problems) - inference_batch_size):
                 start_from = 0
-            self.train()
+            self.model_id = self.spawn_training()
 
-    def upload_solutions(self, train_samples, filename = "train_samples.txt"):
+    def upload_solutions(self, train_samples, all_samples, filename = "train_samples.txt", all_filename = "all_samples.txt"):
         with open(filename, 'a', encoding='utf-8') as file:
             for sample in train_samples:
+                serialized_sample = json.dumps(sample, ensure_ascii=False)
+                file.write(serialized_sample + "\n")
+        with open(all_filename, 'a', encoding='utf-8') as file:
+            for sample in all_samples:
                 serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
 
@@ -181,8 +201,9 @@ class ModelManager:
                 if len(train_samples) >= max_samples:
                     break
         return train_samples
-    def archive_solutions(self, filename="train_samples.txt"):
+    def archive_solutions(self, filename="train_samples.txt", all_filename="all_samples.txt"):
         os.rename(filename, filename + '-' + self.iteration)
+        os.rename(all_filename, all_filename + '-' + self.iteration)
 
     def train(self):
         train_samples = self.load_solutions(max_samples = self.max_train_batches * self.batch_size)
@@ -231,13 +252,18 @@ def run_inference(model_name, start_from, num_samples, iteration, do_test, MPque
     asyncio.run(model_manager.run_inference(iteration, do_test))
     MPqueue.put("done")
 
-
+def run_training(model_name, MPqueue):
+    logger.add("learning.log", rotation = "100 MB")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
+    model_manager = ModelManager(model_name)
+    model_manager.train()
+    MPqueue.put(model_manager.MathLLM.model_id)
 
 
 if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager("trained_iter_20240209-115306")
+    model_manager = ModelManager("microsoft/phi-2")
     #run the process_queue method in the background
-    asyncio.run(model_manager.run_training())
+    asyncio.run(model_manager.run())

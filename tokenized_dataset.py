@@ -59,13 +59,11 @@ class TokenizedDataset(Dataset):
             # Padding to reach max_length - not sure why, but it seems to improve accuracy
             padding_length = self.max_length - current_length
             if padding_length > 0:
-                pad_token_id = self.tokenizer.pad_token_id
-                for key in combined_item:
-                    combined_item[key] = np.pad(combined_item[key], (0, padding_length),
-                                                constant_values=pad_token_id)
-                    # we don't want to incurr a loss in the padding items
-                    if key == "labels" and padding_length > 0:
-                        combined_item[key][-padding_length:] = -100
+                pad_token_id = self.tokenizer.eos_token_id
+                if padding_length > 0:
+                    combined_item["labels"] = np.pad(combined_item["labels"], (0, padding_length), constant_values=-100)
+                    combined_item["input_ids"] = np.pad(combined_item["input_ids"], (0, padding_length), constant_values=pad_token_id)
+                    combined_item["attention_mask"] = np.pad(combined_item["attention_mask"], (0, padding_length), constant_values=0)
 
             # Ensure we always have at least one item to add to avoid empty data
             if items_to_remove:
@@ -141,4 +139,4 @@ class TokenizedQADataset(TokenizedDataset):
         logger.info(f"Mean length of tokens per window: {self.mean_length}")
         self.packed_data = self.data.copy()
 
-        #self.pack(64)
+#        self.pack(64)

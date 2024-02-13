@@ -1,6 +1,6 @@
 import numpy as np
 from loguru import logger
-from code_interpreter import compute_result, INVALID_ANSWER
+from code_interpreter import compute_result, INVALID_ANSWER, crop_solution
 import asyncio
 import random
 import re
@@ -36,6 +36,7 @@ class Solution:
         cleaned_lines = [line for line in lines if not (line.strip().startswith('print(') or line.strip() == '#' or line.strip() == '' or line.strip().startswith("if __name__") or line.strip().startswith("if __name__ =="))]
         # Join the cleaned lines back into a single string
         cleaned_code = '\n'.join(cleaned_lines)
+        cleaned_code = crop_solution(cleaned_code)
         return cleaned_code
 
     def __str__(self):
@@ -85,14 +86,24 @@ class Problem:
             return
         self.best_answer = max(answer_counts, key=answer_counts.get)
         best_solutions = []
+        best_len = 100000
         for solution in self.solutions:
             if solution.answer == self.best_answer:
                 best_solutions.append(solution)
+        #        if len(solution.get_train_solution()) < best_len:
+        #            best_len = len(solution.get_train_solution())
+        #            self.best_solution = solution
         self.best_solution = random.choice(best_solutions)
-
 
     def get_train_sample(self):
         return {'prompt' : self.best_solution.get_train_prompt(), 'solution' : self.best_solution.get_train_solution()}
+    def get_all_samples(self):
+        self.all_solutions = []
+        for s in self.solutions:
+            problem_json = {'question': self.question, 'solution': s.get_train_solution(), 'ground_numeric_answer': self.ground_numeric_answer, 'answer': s.answer}
+            self.all_solutions.append(problem_json)
+        return self.all_solutions
+
 
     def __str__(self):
         return self.question

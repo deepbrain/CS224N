@@ -42,8 +42,8 @@ def compute_result(prompt_string, output_string, function_name, should_crop_solu
 
         lines = output_string.split("\n") # prompt string contains the function
         for i in range(len(lines)):
-            if "while True" in lines[i]:
-                lines[i] = lines[i].replace("while True", "for i in range(1)")
+            if "while " in lines[i]:
+                lines[i] = ""
         output_string = "\n".join(lines)
 
         # potentially crop solution
@@ -122,6 +122,29 @@ test_code = """def problem() -> int:
         states = new_states
     return min(time for state in states if all(state) for time in range(1, max(intervals) + 1))"""
 
+test_code2 = """def problem() -> int:
+    # number of guests at the first venue
+    guests_1 = 0
+    # number of guests at the second venue
+    guests_2 = 0
+    # cost of the first venue
+    cost_1 = 200
+    # cost of the second venue
+    cost_2 = 0
+    # cost of food for each guest at the first venue
+    food_cost_1 = 5
+    # calculate the cost of the first venue for a given number of guests
+    def cost_1_for_guests(guests):
+        return cost_1 + (guests * food_cost_1)
+    # calculate the cost of the second venue for a given number of guests
+    def cost_2_for_guests(guests):
+        return cost_2 + (guests * 25)
+    # find the number of guests at which the costs of the two venues are equal
+    while cost_1_for_guests(guests_1) != cost_2_for_guests(guests_2):
+        guests_1 += 1
+    return guests_1': timed out after 3 seconds
+"""
+
 if __name__ == "__main__":
     # test case
-    print(compute_result("", test_code, "problem"))
+    print(compute_result("", test_code2, "problem"))
