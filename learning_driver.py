@@ -39,13 +39,8 @@ class ModelManager:
 
 
     def shuffle_and_batch(self, start_from, num_samples):
-        # Shuffle the list of problems to ensure randomness
-        #set the random seed to ensure reproducibility
-        random.seed(0)
-        random.shuffle(self.train_problems)
-        # Split the list into batches
         train_problems = self.train_problems[start_from:start_from+num_samples]
-        self.batches = [self.train_problems[i:i + self.batch_size] for i in range(0, len(train_problems), self.batch_size)]
+        self.batches = [train_problems[i:i + self.batch_size] for i in range(0, len(train_problems), self.batch_size)]
         self.batch_index = 0
         self.test_batches = [self.test_problems[i:i + self.batch_size] for i in range(0, len(self.test_problems), self.batch_size)]
         self.test_batch_index = 0
@@ -175,7 +170,7 @@ class ModelManager:
         start_from = 0
         inference_batch_size = 1024
         for i in range(100):
-            do_test = True#i != 0
+            do_test = i != 0
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
             start_from += inference_batch_size
             if start_from > (len(self.train_problems) - inference_batch_size):
@@ -216,7 +211,7 @@ class ModelManager:
         self.MathLLM.unload_model()
         del self.MathLLM
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
-        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True)
+        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=model_id == "microsoft/phi-2")
         self.archive_solutions()
 
     async def process_queue(self):

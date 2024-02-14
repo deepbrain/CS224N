@@ -196,7 +196,7 @@ class MathLLM:
         else:
             return None
 
-    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False):
+    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False, train_eos = False):
         # trains with a lora model on a batch of problems and saves the model to a new_model_id
         #  read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
 
@@ -233,6 +233,11 @@ class MathLLM:
 
             # gradient checkpointing to save memory
             base_model.gradient_checkpointing_enable()
+            if train_eos:
+                modules_to_save = ["embed_tokens", "lm_head"]
+                lr = lr / 5
+            else:
+                modules_to_save = []
 
             config = LoraConfig(
                 r=16,
@@ -245,8 +250,8 @@ class MathLLM:
                     'fc1',
                     'fc2',
                 ],  # print(model) will show the modules to use
-                modules_to_save=["embed_tokens", "lm_head"],
                 bias="none",
+                modules_to_save = modules_to_save,
                 lora_dropout=0.1,
                 task_type="CAUSAL_LM",
             )
@@ -258,7 +263,7 @@ class MathLLM:
                 gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=8,  # 4
+                gradient_accumulation_steps=16,  # 4
                 optim="paged_adamw_32bit",
                 #adam_beta1=0.9, #--------
                 #adam_beta2=0.95, #-----------
