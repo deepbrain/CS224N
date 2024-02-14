@@ -60,6 +60,6 @@ if __name__ == '__main__':
     problem = "Solve the equation 2x + 3 = 7"
     sol1 = "x = 2"
     sol2 = "x = 4"
-    result = math_gpt.ask_openai2(problem, sol1, sol2) # model = "gpt-4-1106-preview"
+    result = math_gpt.ask_openai2(problem, sol1, sol2)
     print(result)
     logger.info(f"Result: {result}")

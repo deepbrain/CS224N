@@ -44,6 +44,8 @@ class MathLLM:
         max_context_length=2048,
         dataset_class=TokenizedDataset,
     ):
+        if not model_id.startswith("microsoft/phi-2"):
+            revision = None
         self.model_id = model_id
         self.revision = revision
         self.use_quantization = use_quantization
@@ -214,11 +216,16 @@ class MathLLM:
             base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=False)
             #base_tokenizer.pad_token = base_tokenizer.eos_token
             base_tokenizer.padding_side = "right"
+            logger.info(f"Training with model: {base_model_id} revision: {str(base_model_revision)}")
 
-            #base_tokenizer.add_tokens(["<|endoftext|>"])
+            if train_eos:
+                base_tokenizer.add_tokens(["<|endoftext|>"])
+                base_tokenizer.add_special_tokens(dict(eos_token="<|endoftext|>"))
+                modules_to_save = ["embed_tokens", "lm_head"]
+                lr = lr / 10
+            else:
+                modules_to_save = []
 
-#            base_tokenizer.pad_token = "<PAD>"
-            #base_tokenizer.add_special_tokens(dict(eos_token="<|endoftext|>"))
             base_model.config.eos_token_id = base_tokenizer.eos_token_id
 
             base_tokenizer.pad_token = base_tokenizer.eos_token
@@ -233,11 +240,6 @@ class MathLLM:
 
             # gradient checkpointing to save memory
             base_model.gradient_checkpointing_enable()
-            if train_eos:
-                modules_to_save = ["embed_tokens", "lm_head"]
-                lr = lr / 5
-            else:
-                modules_to_save = []
 
             config = LoraConfig(
                 r=16,
@@ -263,14 +265,14 @@ class MathLLM:
                 gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=16,  # 4
+                gradient_accumulation_steps=4,  # 4
                 optim="paged_adamw_32bit",
-                #adam_beta1=0.9, #--------
-                #adam_beta2=0.95, #-----------
+                adam_beta1=0.9, #--------
+                adam_beta2=0.95, #-----------
                 save_steps=0,
                 logging_steps=1,
                 learning_rate=lr,
-                weight_decay=0.03,
+                weight_decay=0.01,
                 fp16 = False,
                 bf16 = False,
 #                fp16=not self.HAS_BFLOAT16,
@@ -313,6 +315,7 @@ class MathLLM:
                 self.merge_lora()
 
     def evaluate(self):
+        logger.info(f"Evaluating model: {self.model_id} revision: {str(self.revision)}")
         if isinstance(self.model, LLM):
             self.unload_model()
         if self.model is None:

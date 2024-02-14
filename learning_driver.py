@@ -39,6 +39,7 @@ class ModelManager:
 
 
     def shuffle_and_batch(self, start_from, num_samples):
+        logger.info(f"Batching {num_samples} samples starting from {start_from}")
         train_problems = self.train_problems[start_from:start_from+num_samples]
         self.batches = [train_problems[i:i + self.batch_size] for i in range(0, len(train_problems), self.batch_size)]
         self.batch_index = 0
@@ -112,6 +113,7 @@ class ModelManager:
         for prompt in self.prompts:
             prompt.reset_stats()
         self.problems = []
+        logger.info(f"Testing model {self.MathLLM.model_id}")
         self.MathLLM.evaluate()
         self.test = True
         self.test_batch_index = 0
@@ -157,7 +159,7 @@ class ModelManager:
         if GPU != -1:
             bkp = os.environ["CUDA_VISIBLE_DEVICES"]
             os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        p = Process(target=run_training, args=(self.MathLLM.model_id, MPqueue))
+        p = Process(target=run_training, args=(self.model_id, MPqueue))
         p.start()
         p.join()
         if GPU != -1:
@@ -210,8 +212,9 @@ class ModelManager:
         model_id = self.MathLLM.model_id
         self.MathLLM.unload_model()
         del self.MathLLM
+        logger.info(f"Training model {model_id} from iteration {self.iteration}")
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
-        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=model_id == "microsoft/phi-2")
+        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 2e-4, merge = True, train_eos=model_id == "microsoft/phi-2")
         self.archive_solutions()
 
     async def process_queue(self):
