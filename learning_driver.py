@@ -276,6 +276,6 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager("trained_iter_20240215-111404")
+    model_manager = ModelManager("microsoft/phi-2")
     #run the process_queue method in the background
     asyncio.run(model_manager.run())
