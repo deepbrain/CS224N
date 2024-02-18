@@ -52,7 +52,9 @@ class MathGPT:
             return None
 
 
+
 if __name__ == '__main__':
+
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
     args = None
