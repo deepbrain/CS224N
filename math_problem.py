@@ -73,6 +73,7 @@ class Problem:
         tasks = [asyncio.create_task(solution.solve()) for solution in self.solutions]
         answers = await asyncio.gather(*tasks)
         answer_counts = {}
+        self.comparative_solutions = []
         for a in answers:
             if a != INVALID_ANSWER:
                 if a in answer_counts:
@@ -83,6 +84,7 @@ class Problem:
             self.best_answer = INVALID_ANSWER
             self.best_solution = random.choice(self.solutions)
             logger.error(f"No valid answers for problem: {self.question}")
+            self.train_solution = None
             return
         self.best_answer = max(answer_counts, key=answer_counts.get)
         best_solutions = []
@@ -90,19 +92,54 @@ class Problem:
         for solution in self.solutions:
             if solution.answer == self.best_answer:
                 best_solutions.append(solution)
-        #        if len(solution.get_train_solution()) < best_len:
-        #            best_len = len(solution.get_train_solution())
-        #            self.best_solution = solution
+                if len(solution.get_train_solution()) < best_len:
+                    best_len = len(solution.get_train_solution())
+                    self.best_solution = solution
+        # with probability 1/2 do this
+        #if random.randint(0, 1) == 0:
         self.best_solution = random.choice(best_solutions)
+        #self.best_solution = random.choice(best_solutions) #TODO use comparative prompts here
+        self.best_count = answer_counts[self.best_answer]
+        if self.best_count >= 3:
+            self.train_solution = self.best_solution.get_train_solution()
+            self.train_prompt = self.best_solution.get_train_prompt()
+        else:
+            self.train_solution = None
+            self.train_prompt = None
+        return # training on the same prompt
+
+        if self.best_count >= 2:
+            for s in self.solutions:
+                if s.answer == self.best_answer:
+                    problem_json = {'question': self.question, 'solution': s.get_train_solution(), 'ground_numeric_answer': self.ground_numeric_answer, 'answer': s.answer}
+                    self.comparative_solutions.append(problem_json)
+
+        if (self.best_count >= 3) and (self.best_count < len(prompts)):
+            candidates = []
+            for s in self.solutions:
+                if s.answer != self.best_answer:
+                    candidates.append(s)
+            solution = random.choice(candidates)
+            self.train_prompt = solution.get_train_prompt()
+            self.train_solution = self.best_solution.get_train_solution()
+        else:
+            self.train_solution = None
+            self.train_prompt = None
 
     def get_train_sample(self):
-        return {'prompt' : self.best_solution.get_train_prompt(), 'solution' : self.best_solution.get_train_solution()}
+        if self.train_solution is None:
+            return None
+        else:
+            return {'prompt' : self.train_prompt, 'solution' : self.train_solution}
     def get_all_samples(self):
         self.all_solutions = []
         for s in self.solutions:
             problem_json = {'question': self.question, 'solution': s.get_train_solution(), 'ground_numeric_answer': self.ground_numeric_answer, 'answer': s.answer}
             self.all_solutions.append(problem_json)
         return self.all_solutions
+
+    def get_comparative_samples(self):
+        return self.comparative_solutions
 
 
     def __str__(self):

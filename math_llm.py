@@ -106,6 +106,7 @@ class MathLLM:
                     del self.base_model
                     self.base_model = None
             del self.tokenizer
+            gc.collect()
             torch.cuda.empty_cache()
             self.model = None
             self.tokenizer = None
@@ -115,7 +116,7 @@ class MathLLM:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return self.model, self.tokenizer
 
-    def process_batch_regular(self, batch, max_tokens, temperature = 0.1, top_p = 0.1, presence_penalty=1, frequency_penalty=1):
+    def process_batch_regular(self, batch, max_tokens, temperature, top_p, presence_penalty, frequency_penalty):
             # Tokenize the batch
             self.tokenizer.padding_side = "left"
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -144,7 +145,7 @@ class MathLLM:
 
             return decoded_outputs
 
-    def process_batch(self, batch, max_tokens, temperature = 0.1, top_p = 0.1, presence_penalty=0.5, frequency_penalty=0.5):
+    def process_batch(self, batch, max_tokens, temperature, top_p, presence_penalty, frequency_penalty):
            #processes a batch of prompts and returns a batch of solutions one per prompt
         # check if self.model is instance of the LLM class:
         if self.model is None:
@@ -158,7 +159,7 @@ class MathLLM:
            output.append(prompt + completion.outputs[0].text)
         return output
 
-    async def process_batch_async(self, batch, max_tokens, temperature=0.5, top_p=0.2, presence_penalty=0.1, frequency_penalty=0.1):
+    async def process_batch_async(self, batch, max_tokens, temperature, top_p, presence_penalty, frequency_penalty):
         async with self.lock:
             loop = asyncio.get_running_loop()
             # Use functools.partial to pass arguments to the function
@@ -265,14 +266,14 @@ class MathLLM:
                 gradient_checkpointing=True, #------------
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=4,  # 4
+                gradient_accumulation_steps=16,  # 4
                 optim="paged_adamw_32bit",
                 adam_beta1=0.9, #--------
                 adam_beta2=0.95, #-----------
                 save_steps=0,
                 logging_steps=1,
                 learning_rate=lr,
-                weight_decay=0.01,
+                weight_decay=0.05,
                 fp16 = False,
                 bf16 = False,
 #                fp16=not self.HAS_BFLOAT16,
@@ -320,7 +321,7 @@ class MathLLM:
             self.unload_model()
         if self.model is None:
             self.model, self.tokenizer = self.load_model_regular(self.model_id, self.revision)
-        nlp_tasks_res = evaluate_on_nlp_tasks(self.model, self.revision, limit=300)
+        nlp_tasks_res = evaluate_on_nlp_tasks(self.model, self.revision, limit=2000)
         logger.info(nlp_tasks_res["results"])
         del nlp_tasks_res
         self.unload_model()

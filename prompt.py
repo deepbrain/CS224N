@@ -147,41 +147,36 @@ def compute_oracle_accuracy(problems, prompts, rephrasing=-1):
 def get_old_prompts(): #returns instances of Prompt for each of the 10 old prompts
     function_name = "problem"
     prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-             "       Elaborate your thinking step by step in comments before each code line below. End with return result\n"
-    train_prompt = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                "       Think step by step in comments below.\n"
-    prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s" + \
-              "       Add comments before each line. End with return result\n"
-    train_prompt2 = train_prompt
+             "        Elaborate your thinking step by step in comments before each code line below\n    \"\"\"\n"
+    train_prompt = prompt
+    prompt2 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
+              "       Add comments before each line\n    \"\"\"\n"
+    train_prompt2 = prompt2
     prompt3 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       Be accurate and think step by step in comments before each code line below. End with return result\n"
-    train_prompt3 = train_prompt
+              "       Be accurate and think step by step in comments before each code line below\n    \"\"\"\n"
+    train_prompt3 = prompt3
     prompt4 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       Find unusual solution and comment before each of your line of code. End with return result\n"
-    train_prompt4 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                "       Find unusual solution.\n"
+              "       Find unusual solution and comment before each of your line of code\n    \"\"\"\n"
+    train_prompt4 = prompt4
     prompt5 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       In your comments write an algebraic formula based on the problem, solve it algebraically, then write code to calculate the result. End with return result\n"
-    train_prompt5 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                "       Solve algebraically and write code to calculate the result.\n"
+              "       In your comments write an algebraic formula based on the problem, solve it algebraically, then write code to calculate the result\n    \"\"\"\n"
+    train_prompt5 = prompt5
     prompt6 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       Find the most elegant and correct solution. End with return result\n"
-    train_prompt6 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                "       Find an elegant solution.\n"
+              "       Find the most elegant and correct solution\n    \"\"\"\n"
+    train_prompt6 = prompt6
     prompt7 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       Think step by step in comments before each code line below. End with return result"
-    train_prompt7 = train_prompt
+              "       Think step by step in comments before each code line below\n    \"\"\"\n"
+    train_prompt7 = prompt7
     prompt8 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              "       You must elaborate your thinking in comments below. End with return result"
-    train_prompt8 = train_prompt
+              "       You must elaborate your thinking in comments below\n    \"\"\"\n"
+    train_prompt8 = prompt8
+
     prompt9 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-              """      Is this a simple math or algebra problem? For algebra problems, you must elaborate and solve it algebraically in the comments first, then write code to calculate the result. For simple math problems, you can write code to calculate the result directly. End with return result\n"""
-    train_prompt9 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                "       Solve the problem, you may use algebra in comments.\n"
+              "       Is this a simple math or algebra problem? For algebra problems, you must elaborate and solve it algebraically in the comments first, then write code to calculate the result. For simple math problems, you can write code to calculate the result directly\n    \"\"\"\n"
+    train_prompt9 = prompt9
     prompt10 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-               """    First, let's solve this problem using pure symbolic expressions. Elaborate with your algebraic skills below. Use x,y,z...to denote unknown variables. Use a,b,c... to denote given constants. Then write a pure python code to compute and return the result. End with return result\n    Let x be"""
-    train_prompt10 = f"def {function_name}() -> int:\n    \"\"\"%s\n" + \
-                    "       Solve using pure symbolic expressions and write code to compute the result.\n"
+              "       First, let's solve this problem using pure symbolic expressions. Elaborate with your algebraic skills below. Use x,y,z...to denote unknown variables. Use a,b,c... to denote given constants. Then write a python code to compute the result\n    \"\"\"\n"
+    train_prompt10 = prompt10
     prompt_texts = [prompt, prompt2, prompt3, prompt4, prompt5, prompt6, prompt7, prompt8, prompt9, prompt10]
     train_prompts = [train_prompt, train_prompt2, train_prompt3, train_prompt4, train_prompt5, train_prompt6, train_prompt7, train_prompt8, train_prompt9, train_prompt10]
     return [Prompt(prompt_text, train_prompt, function_name) for prompt_text,train_prompt in zip(prompt_texts, train_prompts)]
