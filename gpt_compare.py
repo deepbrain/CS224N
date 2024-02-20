@@ -45,7 +45,7 @@ class GPT:
         presence_penalty = self.presence_penalty if presence_penalty is None else presence_penalty
 
         prompt = copy.deepcopy(self.prompt)
-        prompt[0]["content"] = message
+        prompt[-1]["content"] = message
 
         try:
             if 'instruct' in model:
@@ -71,6 +71,36 @@ class GPT:
             return None
 
 class RephraseGPT(GPT):
+    def __init__(
+        self,
+        model="gpt-3.5-turbo-1106",
+        prompt=None,
+
+        # OPENAI QUERY PARAMS, NOTGIVEN is the default
+        temperature = NOT_GIVEN,
+        top_p = NOT_GIVEN,
+        freq_penalty = NOT_GIVEN,
+        presence_penalty = NOT_GIVEN,
+    ):
+        super().__init__(model, temperature, top_p, freq_penalty, presence_penalty, prompt)
+        if prompt is None:
+            self.prompt = [
+                {
+                    "role": "system",
+                    "content": "You are a rephrasing assistant. "\
+                               "You are brillinat in creatively rephrasing whatever the user indicates you. "\
+                               "When rephrasing, you can cleverly vary the grammatical structure of sentences without changing their overall meaning. "\
+                               "Additionally, you can change words too, as long as the meaning of the sentence is preserved. "\
+                               "Also, you do not miss any detail when rephrasing sentences."
+                },
+                {
+                    "role":"user",
+                    "content":"", # this will be replaced with your message
+                }
+            ]
+        else:
+            self.prompt = prompt
+
     def ask_openai2(self, prompt=None, problem=None, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None):
         if prompt is None:
             assert problem is not None
@@ -78,7 +108,6 @@ class RephraseGPT(GPT):
         elif problem is None:
             assert prompt is not None
             message = f"Rephrase the following prompt: {prompt}"
-        print(message)
         return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty)
     
 
@@ -123,10 +152,18 @@ if __name__ == '__main__':
 
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
+    
+    print("========= TESTING MATH GPT =========")
     math_gpt = MathGPT()
     problem = "Solve the equation 2x + 3 = 7"
     sol1 = "x = 2"
     sol2 = "x = 4"
+    result = math_gpt.ask_openai2(problem, sol1, sol2)
+    print(result)
+
+    print("========= TESTING REPHRASE GPT =========")
+    rephrase_gpt = RephraseGPT()
+    problem = "If 3 boys each make 12 muffins for a bake sale, and 2 other girls are making 20 muffins each, how many total muffins will be for sale?"
     result = math_gpt.ask_openai2(problem, sol1, sol2)
     print(result)
     logger.info(f"Result: {result}")
