@@ -1,4 +1,5 @@
 from openai import OpenAI
+from openai._types import NOT_GIVEN
 import copy
 import concurrent.futures
 from loguru import logger
@@ -8,11 +9,13 @@ class GPT:
     def __init__(
         self,
         model="gpt-3.5-turbo-1106",
-        temperature = 0.0,
-        top_p = 0.0,
-        freq_penalty = 0.0,
-        presence_penalty = 0.0,
         prompt=None,
+
+        # OPENAI QUERY PARAMS, NOTGIVEN is the default
+        temperature = NOT_GIVEN,
+        top_p = NOT_GIVEN,
+        freq_penalty = NOT_GIVEN,
+        presence_penalty = NOT_GIVEN,
     ):
         self.model = model
         self.temperature = temperature
@@ -67,15 +70,29 @@ class GPT:
             logger.error(f"Error: {e}")
             return None
 
+class RephraseGPT(GPT):
+    def ask_openai2(self, prompt=None, problem=None, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None):
+        if prompt is None:
+            assert problem is not None
+            message = f"Rephrase the following problem: {problem} "
+        elif problem is None:
+            assert prompt is not None
+            message = f"Rephrase the following prompt: {prompt}"
+        print(message)
+        return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty)
+    
+
 class MathGPT(GPT):
     def __init__(
         self,
         model="gpt-3.5-turbo-1106",
-        temperature = 0.0,
-        top_p = 0.0,
-        freq_penalty = 0.0,
-        presence_penalty = 0.0,
         prompt=None,
+
+        # OPENAI QUERY PARAMS, NOTGIVEN is the default
+        temperature = NOT_GIVEN,
+        top_p = NOT_GIVEN,
+        freq_penalty = NOT_GIVEN,
+        presence_penalty = NOT_GIVEN,
     ):
         super().__init__(model, temperature, top_p, freq_penalty, presence_penalty, prompt)
         if prompt is None:
