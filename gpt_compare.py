@@ -4,6 +4,8 @@ import copy
 import concurrent.futures
 from loguru import logger
 import logging
+import tiktoken
+import numpy as np
 
 class GPT:
     def __init__(
@@ -33,7 +35,7 @@ class GPT:
         else:
             self.prompt = prompt
 
-    def ask_openai2(self, message, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None):
+    def ask_openai2(self, message, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, **query_kwargs):
         """
         * message: is basically what's sent to GPT as a prompt for it to give us a response back.
         * the other args are just overrides to the query parameters of the gpt model
@@ -53,14 +55,14 @@ class GPT:
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(self.client.completions.create, model=model, prompt=prompt,
                                              temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty,
-                                             presence_penalty=presence_penalty, max_tokens=1000)
+                                             presence_penalty=presence_penalty, max_tokens=1000, **query_kwargs)
                     response = future.result(timeout=60)  # Timeout set for 60 seconds
                     return response.choices[0].text
             else:
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(self.client.chat.completions.create, model=model, messages=prompt,
                                              temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty,
-                                             presence_penalty=presence_penalty, max_tokens=1000)
+                                             presence_penalty=presence_penalty, max_tokens=1000, **query_kwargs)
                 response = future.result(timeout=60)  # Timeout set for 60 seconds
                 return response.choices[0].message.content
         except concurrent.futures.TimeoutError:
@@ -101,15 +103,44 @@ class RephraseGPT(GPT):
         else:
             self.prompt = prompt
 
-    def ask_openai2(self, prompt=None, problem=None, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None):
+    def get_repetition_penalty_dict(self, texts, penalty_multiplier=None):
+        penalty_multiplier = 1 if penalty_multiplier is None else penalty_multiplier
+        tokenizer_id = None
+        if "gpt-3" in self.model: tokenizer_id = "gpt-3.5"
+        elif "gpt-4" in self.model: tokenizer_id = "gpt-4"
+        enc = tiktoken.encoding_for_model(tokenizer_id)
+        occurrences = {}
+        for text in texts:
+            text_enc = enc.encode(text)
+            for tok in set(text_enc):
+                if tok not in occurrences:
+                    occurrences[tok]=0
+                occurrences[tok] += 1
+        penalty = {tok:-np.log(occ+1)*penalty_multiplier for tok, occ in occurrences.items()}
+        return penalty
+
+    def ask_openai2(self, prompt=None, problem=None, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, **query_kwargs):
         if prompt is None:
             assert problem is not None
             message = f"Rephrase the following problem: {problem} "
         elif problem is None:
             assert prompt is not None
             message = f"Rephrase the following prompt: {prompt}"
-        return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty)
+        return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty, **query_kwargs)
     
+    def ask_openai2_multiple(self, prompt=None, problem=None, num_samples=1, repetition_penalty_multiplier=None, **kwargs):
+        results = []
+        if prompt is None:
+            assert problem is not None
+            for i in range(num_samples):
+                repetition_penalty_dict = self.get_repetition_penalty_dict([problem] + results, repetition_penalty_multiplier)
+                results.append(self.ask_openai2(problem=problem, **kwargs, logit_bias=repetition_penalty_dict))
+        elif problem is None:
+            assert prompt is not None
+            for i in range(num_samples):
+                repetition_penalty_dict = self.get_repetition_penalty_dict([prompt] + results, repetition_penalty_multiplier)
+                results.append(self.ask_openai2(prompt=prompt, **kwargs, logit_bias=repetition_penalty_dict))
+        return results
 
 class MathGPT(GPT):
     def __init__(
@@ -137,7 +168,7 @@ class MathGPT(GPT):
                 }
             ]
 
-    def ask_openai2(self, problem, sol1, sol2, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None):
+    def ask_openai2(self, problem, sol1, sol2, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, **query_kwargs):
         message = "Pretend you are an expert Math teacher and python coder. \nCompare the following two solutions to a math problem: \"{problem}\"\n" +\
                 "The Solution1 is: {sol1}\nSolution1 ends here. \n\n\nThe Solution2 is: {sol2}\nSolution2 ends here.\n" +\
                 "Write a JSON string comparing the solutions. Think step by step and identify what is incorrect. Example:\n" +\
@@ -146,7 +177,7 @@ class MathGPT(GPT):
                             "\"better_solution_is\": \"1\"\n" +\
                             "}}"
         message = message.format(problem=problem, sol1=sol1, sol2=sol2)
-        return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty)
+        return super().ask_openai2(message, model, temperature, top_p, frequency_penalty, presence_penalty, **query_kwargs)
 
 if __name__ == '__main__':
 
@@ -164,6 +195,6 @@ if __name__ == '__main__':
     print("========= TESTING REPHRASE GPT =========")
     rephrase_gpt = RephraseGPT()
     problem = "If 3 boys each make 12 muffins for a bake sale, and 2 other girls are making 20 muffins each, how many total muffins will be for sale?"
-    result = math_gpt.ask_openai2(problem, sol1, sol2)
+    rephrase_gpt.ask_openai2_multiple(problem=problem, num_samples=3, repetition_penalty_multiplier=5)
     print(result)
     logger.info(f"Result: {result}")
