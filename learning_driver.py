@@ -29,6 +29,7 @@ class ModelManager:
         self.train_problems = get_examples("train")
         if num_samples == -1:
             num_samples = len(self.train_problems) // 2
+        self.num_samples = num_samples
         self.model_id = model_id
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
         self.queue = deque()
@@ -37,6 +38,7 @@ class ModelManager:
         self.problems = []
         self.test = False
         self.learning_iteration = 0
+        self.code_interpreter_lock = asyncio.Lock()
 
 
     def shuffle_and_batch(self, start_from, num_samples):
@@ -75,7 +77,7 @@ class ModelManager:
 
 
     async def generate_solutions(self, solution_class, problems): #generates multiple solutions for each problem by varying prompts
-        tasks = [asyncio.create_task(problem.solve(self.prompts, solution_class)) for problem in problems]
+        tasks = [asyncio.create_task(problem.solve(self.prompts, solution_class, self.test)) for problem in problems]
         results = await asyncio.gather(*tasks) # produces a list of lists of correctness values like [True, False, True]
         mean_accuracy = compute_mean_accuracy(self.problems, self.prompts)
         majority_accuracy = compute_majority_answer_accuracy(self.problems, self.prompts)
@@ -96,23 +98,22 @@ class ModelManager:
         for i, prompt in enumerate(self.prompts):
             prompt_accuracies += f" prompt{i}: {prompt.compute_accuracy():.2f},"
         logger.info(prompt_accuracies)
+        if self.test:
+            return [], []
         train_samples = []
         for problem in problems:
-            train_sample = problem.get_train_sample()
+            train_sample = problem.get_train_samples()
             if train_sample is not None:
-                train_samples.append(train_sample)
+                train_samples.extend(train_sample)
         all_samples = []
         for problem in problems:
             all_samples.extend(problem.get_all_samples())
-        comparative_samples = []
-        for problem in problems:
-            comparative_samples.extend(problem.get_comparative_samples())
-        return train_samples, all_samples, comparative_samples
+        return train_samples, all_samples
 
 
-    async def get_completion(self, prompt, max_tokens = 1000, completion_only=False):
+    async def get_completion(self, prompt, max_tokens = 1000, temperature = 0.3, completion_only=False):
         result_queue = asyncio.Queue(1)
-        params = {"prompt": prompt, "max_tokens": max_tokens, "completion_only": completion_only, "result_queue": result_queue}
+        params = {"prompt": prompt, "max_tokens": max_tokens, "completion_only": completion_only, "result_queue": result_queue, "temperature": temperature}
         self.queue.append(params)
         return await result_queue.get()
 
@@ -122,7 +123,7 @@ class ModelManager:
             prompt.reset_stats()
         self.problems = []
         logger.info(f"Testing model {self.MathLLM.model_id}")
-        self.MathLLM.evaluate()
+        #self.MathLLM.evaluate()
         self.test = True
         self.test_batch_index = 0
         while True:
@@ -148,8 +149,8 @@ class ModelManager:
             problems = await self.create_problems()
             if len(problems) == 0:
                 break
-            train_samples, all_samples, comparative_sampels = await self.generate_solutions(Solution, problems)
-            self.upload_solutions(train_samples, all_samples, comparative_sampels)
+            train_samples, all_samples = await self.generate_solutions(Solution, problems)
+            self.upload_solutions(train_samples, all_samples)
 
     def spawn_inference(self, start_from, num_samples, iteration, do_test, GPU=-1):
         MPqueue = Queue()
@@ -179,7 +180,7 @@ class ModelManager:
     def run(self):
         self.lock = asyncio.Lock()
         start_from = 0
-        inference_batch_size = len(self.train_problems) // 2
+        inference_batch_size = self.num_samples
         for i in range(100):
             do_test = True#i != 0
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
@@ -188,17 +189,13 @@ class ModelManager:
                 start_from = 0
             self.model_id = self.spawn_training()
 
-    def upload_solutions(self, train_samples, all_samples, comparative_sampels, filename = "train_samples.txt", all_filename = "all_samples.txt", compare_filename = "comparative_samples.txt"):
+    def upload_solutions(self, train_samples, all_samples, filename = "train_samples.txt", all_filename = "all_samples.txt"):
         with open(filename, 'a', encoding='utf-8') as file:
             for sample in train_samples:
                 serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
         with open(all_filename, 'a', encoding='utf-8') as file:
             for sample in all_samples:
-                serialized_sample = json.dumps(sample, ensure_ascii=False)
-                file.write(serialized_sample + "\n")
-        with open(compare_filename, 'a', encoding='utf-8') as file:
-            for sample in comparative_sampels:
                 serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
 
@@ -212,22 +209,22 @@ class ModelManager:
                     break
         return train_samples
     def archive_solutions(self, filename="train_samples.txt", all_filename="all_samples.txt"):
-        os.rename(filename, filename + '-' + self.iteration)
-        os.rename(all_filename, all_filename + '-' + self.iteration)
+        if os.path.exists(filename):
+            os.rename(filename, filename + '-' + self.iteration)
+        if os.path.exists(all_filename):
+            os.rename(all_filename, all_filename + '-' + self.iteration)
 
     def train(self):
         train_samples = self.load_solutions(max_samples = 1000000)
-        samples = random.sample(train_samples, len(train_samples))
-        samples = [[d['prompt'], d['solution']] for d in samples]
-        eval_samples = samples[len(samples)-self.batch_size*2:]
-        train_samples = samples[:len(samples)-self.batch_size*2]
+        eval_samples = train_samples[len(train_samples)-self.batch_size*2:]
+        train_samples = train_samples[:len(train_samples)-self.batch_size*2]
         self.iteration = time.strftime("%Y%m%d-%H%M%S")
         model_id = self.MathLLM.model_id
         self.MathLLM.unload_model()
         del self.MathLLM
         logger.info(f"Training model {model_id} from iteration {self.iteration}")
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
-        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=model_id == "microsoft/phi-2")
+        self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 2e-5, merge = True, train_eos=model_id == "microsoft/phi-2", use_dpo = True)
         self.archive_solutions()
 
     async def process_queue(self):
@@ -237,9 +234,16 @@ class ModelManager:
                 batch_max_tokens = []
                 batch_completion_only = []
                 batch_result_queue = []
+                batch_temperature = None
                 count = 0
                 while len(self.queue) > 0:
                     params = self.queue.popleft()
+                    T = params["temperature"]
+                    if batch_temperature is None:
+                        batch_temperature = T
+                    elif T != batch_temperature:
+                        self.queue.appendleft(params)
+                        break
                     batch_prompts.append(params["prompt"])
                     batch_max_tokens.append(params["max_tokens"])
                     batch_completion_only.append(params["completion_only"])
@@ -247,7 +251,7 @@ class ModelManager:
                     count += 1
                     if count == self.inference_batch_size:
                         break
-                solutions = await self.MathLLM.process_batch_async(batch_prompts, max(batch_max_tokens), temperature = 1., top_p=0.6, presence_penalty=0.2, frequency_penalty = 0.2)
+                solutions = await self.MathLLM.process_batch_async(batch_prompts, max(batch_max_tokens), temperature = batch_temperature, top_p=0.6, presence_penalty=0.2, frequency_penalty = 0.2)
                 for i in range(count):
                     sol = solutions[i]
                     if batch_completion_only[i]:
@@ -276,6 +280,6 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager("microsoft/phi-2")
+    model_manager = ModelManager("trained_iter_20240222-154927", num_samples = 1024) #("trained_iter_20240220-235255", num_samples=1024)
     #run the process_queue method in the background
     asyncio.run(model_manager.run())

@@ -10,7 +10,7 @@ if 'LIBRARY_ROOTS' in os.environ:
 #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 from peft import LoraConfig, PeftConfig
-from trl import SFTTrainer
+from trl import SFTTrainer, DPOTrainer
 from transformers import (AutoModelForCausalLM,
                           AutoTokenizer,
                           BitsAndBytesConfig,
@@ -18,8 +18,10 @@ from transformers import (AutoModelForCausalLM,
                           pipeline,
                           logging)
 import transformers
+import json
 print('Using transformers version: ' + transformers.__version__)
 from vllm import LLM, SamplingParams
+from datasets import load_dataset
 import gc
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from peft import LoraConfig, get_peft_model, PeftModel
@@ -32,6 +34,13 @@ from evaluation import evaluate_on_nlp_tasks
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 from numba import cuda
 
+
+def return_prompt_and_responses(samples):
+    return {
+        "prompt": samples["prompt"],
+        "chosen": samples["solution"],
+        "rejected": samples["negative"]
+    }
 
 class MathLLM:
     def __init__(
@@ -199,7 +208,7 @@ class MathLLM:
         else:
             return None
 
-    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False, train_eos = False):
+    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False, train_eos = False, use_dpo = False):
         # trains with a lora model on a batch of problems and saves the model to a new_model_id
         #  read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
 
@@ -231,8 +240,36 @@ class MathLLM:
 
             base_tokenizer.pad_token = base_tokenizer.eos_token
 
-            train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
-            eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
+            if not use_dpo:
+                train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
+                eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
+            else:
+                #save problems to temp file:
+                with open("train_problems.txt", "w") as f:
+                    f.write("[\n")
+                    firstline = True
+                    for problem in problems:
+                        if not firstline:
+                            f.write(",\n")
+                        firstline = False
+                        f.write(json.dumps(problem))
+                    f.write("\n]\n")
+
+                with open("eval_problems.txt", "w") as f:
+                    f.write("[\n")
+                    firstline = True
+                    for problem in eval_problems:
+                        if not firstline:
+                            f.write(",\n")
+                        firstline = False
+                        f.write(json.dumps(problem))
+                    f.write("\n]\n")
+                train_data = load_dataset("json", data_files="train_problems.txt", split="train")
+                original_columns = train_data.column_names
+                train_data = train_data.map(return_prompt_and_responses, batched=True, remove_columns=original_columns)
+                eval_data = load_dataset("json", data_files="eval_problems.txt", split="train")
+                eval_data = eval_data.map(return_prompt_and_responses, batched=True, remove_columns=original_columns)
+
 
 
             base_model.config.use_cache = False
@@ -264,9 +301,9 @@ class MathLLM:
                 output_dir="logs",
                 num_train_epochs=1,
                 gradient_checkpointing=True, #------------
-                per_device_train_batch_size=1,
+                per_device_train_batch_size=4,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=16,  # 4
+                gradient_accumulation_steps=4,  # 4
                 optim="paged_adamw_32bit",
                 adam_beta1=0.9, #--------
                 adam_beta2=0.95, #-----------
@@ -287,16 +324,19 @@ class MathLLM:
                 evaluation_strategy="epoch",
             )
 
-            trainer = SFTTrainer(
+            trainer = DPOTrainer(
                 model=base_model,
+                ref_model = None,
                 train_dataset=train_data,
                 eval_dataset=eval_data,
                 peft_config=config,
                 tokenizer=base_tokenizer,
                 args=training_arguments,
-                packing=False,
-                dataset_text_field="text",
-                max_seq_length=self.max_context_length,
+#                dataset_text_field="text",
+                max_prompt_length=512,
+                max_length=2048,
+                beta = 0.1,
+                loss_type="hinge"
             )
 
             trainer.train()
