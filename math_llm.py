@@ -324,21 +324,33 @@ class MathLLM:
                 evaluation_strategy="epoch",
             )
 
-            trainer = DPOTrainer(
-                model=base_model,
-                ref_model = None,
-                train_dataset=train_data,
-                eval_dataset=eval_data,
-                peft_config=config,
-                tokenizer=base_tokenizer,
-                args=training_arguments,
-#                dataset_text_field="text",
-                max_prompt_length=512,
-                max_length=2048,
-                beta = 0.1,
-                loss_type="hinge"
-            )
-
+            if use_dpo:
+                trainer = DPOTrainer(
+                    model=base_model,
+                    ref_model = None,
+                    train_dataset=train_data,
+                    eval_dataset=eval_data,
+                    peft_config=config,
+                    tokenizer=base_tokenizer,
+                    args=training_arguments,
+    #                dataset_text_field="text",
+                    max_prompt_length=512,
+                    max_length=2048,
+                    beta = 0.1,
+                    loss_type="hinge"
+                )
+            else:
+                trainer = SFTTrainer(
+                    model=base_model,
+                    train_dataset=train_data,
+                    eval_dataset=eval_data,
+                    peft_config=config,
+                    tokenizer=base_tokenizer,
+                    args=training_arguments,
+                    packing=False,
+                    dataset_text_field="text",
+                    max_seq_length=self.max_context_length,
+                )
             trainer.train()
 
             if not new_model_id.endswith("-lora"):
