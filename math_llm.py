@@ -301,9 +301,9 @@ class MathLLM:
                 output_dir="logs",
                 num_train_epochs=1,
                 gradient_checkpointing=True, #------------
-                per_device_train_batch_size=4,
+                per_device_train_batch_size=4 if use_dpo else 1,
                 per_device_eval_batch_size=1,
-                gradient_accumulation_steps=4,  # 4
+                gradient_accumulation_steps=4 if use_dpo else 16,  # 4
                 optim="paged_adamw_32bit",
                 adam_beta1=0.9, #--------
                 adam_beta2=0.95, #-----------
