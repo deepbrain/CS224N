@@ -54,7 +54,8 @@ def train(model_id, epoch, MPqueue):
     iteration = time.strftime("%Y%m%d-%H%M%S")
     train_samples, eval_samples = get_assistant_dataset()
     train_eos = epoch <= 1 # train for the first 2 epochs
-    rephrase_llm.train(train_samples, eval_samples, 'rephrase-phi-'+iteration, lr = 1e-4, merge = True, train_eos=model_id == train_eos)
+    logger.info(f"Train eos: {train_eos}")
+    rephrase_llm.train(train_samples, eval_samples, 'rephrase-phi-'+iteration, lr = 1e-4, merge = True, train_eos=train_eos)
     MPqueue.put(rephrase_llm.model_id)
 
 def multiprocessing_training(model_id, epoch, GPU=-1):
