@@ -6,7 +6,6 @@ from loguru import logger
 import logging
 import tiktoken
 import numpy as np
-from code_interpreter import timeout
 import time
 
 class GPT:
