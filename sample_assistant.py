@@ -41,7 +41,7 @@ def get_max_tokens(problem):
     # multiply by 2.5 to account for longer responses
     return len(problem.split(" ")) * 2 * 2.5
 
-def _rephrase_problems(path, num_rephrases, assistant_checkpoint="./rephrase-phi-v1/rephrase-phi-20240226-013026"):
+def _rephrase_problems(path, num_rephrases, assistant_checkpoint="/home/shubhra/Stanford/gsm/grade_school_math/rephrase-phi-v1/rephrase-phi-20240226-013026"):
     rephrase_llm = MathLLM(
         model_id=assistant_checkpoint,
         use_vllm=True,
