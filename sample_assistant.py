@@ -37,10 +37,25 @@ def format_output(orig_problem, input, outputs):
             rephrases[i] = random.sample(not_none_rephrases, 1)[0]
     return rephrases
 
-def get_max_tokens(problem):
+def get_max_tokens(problem, are_prompts=False):
     # multiply by 2 to account for 2 tokens per word
     # multiply by 2.5 to account for longer responses
-    return len(problem.split(" ")) * 2 * 2.5
+    extra_mult = 2.5 if are_prompts else 1
+    return len(problem.split(" ")) * 2 * 2.5 * extra_mult
+
+def attempt_function_k_times(func, k=10, *args, **kwargs):
+    last_exception = None
+    for _ in range(k):
+        try:
+            # Try to execute the function
+            result = func(*args, **kwargs)
+            return result  # Return immediately if successful
+        except Exception as e:
+            # Catch any exception, store it, and try again
+            last_exception = e
+    # If the function never succeeds, print the last exception and return None
+    print(f"Failed after {k} attempts. Last exception was: {last_exception}")
+    return None
 
 def _rephrase_problems(problems, num_rephrases, assistant_checkpoint, temperature=0.5, are_prompts=False):
     rephrase_llm = MathLLM(
@@ -53,8 +68,8 @@ def _rephrase_problems(problems, num_rephrases, assistant_checkpoint, temperatur
     inputs = prepare_problems(problems, are_prompts=are_prompts)
     all_rephrases = []
     for problem, input in tqdm(zip(problems, inputs)):
-        max_tokens = get_max_tokens(problem)
-        out = rephrase_llm.process_batch(batch=[input]*num_rephrases, max_tokens=max_tokens, temperature=temperature, top_p=1.0, presence_penalty=0, frequency_penalty=0)
+        max_tokens = get_max_tokens(problem, are_prompts=are_prompts)
+        out = attempt_function_k_times(rephrase_llm.process_batch, batch=[input]*num_rephrases, max_tokens=max_tokens, temperature=temperature, top_p=1.0, presence_penalty=0, frequency_penalty=0)
         rephrases = format_output(problem, input, out)
         all_rephrases.append(rephrases)
 
