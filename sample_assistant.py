@@ -13,11 +13,12 @@ def parse_input_file(filename):
             res.append(sample)
     return res
 
-def prepare_problems(problems):
+def prepare_problems(problems, are_prompts=False):
     prepared_problems = []
+    name = "prompt" if are_prompts else "problem"
     for problem in problems:
         problem = problem.rstrip() + "\n"
-        problem = f"Rephrase the following problem: {problem}"
+        problem = f"Rephrase the following {name}: {problem}"
         prepared_problems.append(problem)
     return prepared_problems
 
@@ -41,30 +42,32 @@ def get_max_tokens(problem):
     # multiply by 2.5 to account for longer responses
     return len(problem.split(" ")) * 2 * 2.5
 
-def _rephrase_problems(path, num_rephrases, assistant_checkpoint="/home/shubhra/Stanford/gsm/grade_school_math/rephrase-phi-v1/rephrase-phi-20240226-013026"):
+def _rephrase_problems(problems, num_rephrases, assistant_checkpoint, temperature=0.5, are_prompts=False):
     rephrase_llm = MathLLM(
         model_id=assistant_checkpoint,
         use_vllm=True,
         load=True,
         dataset_class=TokenizedQADataset,
     )
-    
-    parsed_lines = parse_input_file(path)
-    problems = [line["problem"] for line in parsed_lines]
-    inputs = prepare_problems(problems)
-    
+
+    inputs = prepare_problems(problems, are_prompts=are_prompts)
     all_rephrases = []
     for problem, input in tqdm(zip(problems, inputs)):
         max_tokens = get_max_tokens(problem)
-        out = rephrase_llm.process_batch(batch=[input]*num_rephrases, max_tokens=max_tokens, temperature=0.5, top_p=1.0, presence_penalty=0, frequency_penalty=0)
+        out = rephrase_llm.process_batch(batch=[input]*num_rephrases, max_tokens=max_tokens, temperature=temperature, top_p=1.0, presence_penalty=0, frequency_penalty=0)
         rephrases = format_output(problem, input, out)
         all_rephrases.append(rephrases)
 
     return list(zip(problems, all_rephrases))
 
+def _parse_and_rephrase_problems(path, num_rephrases, assistant_checkpoint="/home/shubhra/Stanford/gsm/grade_school_math/rephrase-phi-v1/rephrase-phi-20240226-013026"):
+    parsed_lines = parse_input_file(path)
+    problems = [line["problem"] for line in parsed_lines]
+    return _rephrase_problems(problems, num_rephrases, assistant_checkpoint)
+
 def rephrase_and_write_to_json(input_path, output_path):
     prompts = get_old_prompts()
-    problems_rephrases = _rephrase_problems(input_path, len(prompts))
+    problems_rephrases = _parse_and_rephrase_problems(input_path, len(prompts))
     with open(output_path, 'a', encoding='utf-8') as file:
         for problem, rephrases in problems_rephrases:
             output_obj = {}
