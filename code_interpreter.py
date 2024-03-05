@@ -20,6 +20,25 @@ def crop_solution(out):
         return out
     return out[:e]
 
+def valStr(val): #convert string to float, handling all exceptions
+    try:
+        return float(val)
+    except ValueError:
+        return INVALID_ANSWER
+
+def trace_valid(trace):
+    for t in trace:
+        t = valStr(t)
+        if t == INVALID_ANSWER:
+            return False
+        if t > 0 and t < 1e-10:
+            return False
+        if t > 1e15:
+            return False
+        if t < -1e15:
+            return False
+    return True
+
 
 log_lines = []
 def log_trace(s):
@@ -63,7 +82,8 @@ def child_task(input_code_string, function_name):
     try:
         res = globals()[function_name]()
         try:
-            res = int(res)
+            #round to 2 decimal places
+            res = round(res, 2)
         except Exception as e:
             res = INVALID_ANSWER
         return res, error, log_lines

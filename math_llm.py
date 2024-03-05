@@ -208,7 +208,127 @@ class MathLLM:
         else:
             return None
 
-    def train(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False, train_eos = False, use_dpo = False):
+    def train(self, problems, eval_problems, new_model_id, lr=1e-4, merge=False, train_eos=False):
+            # trains with a lora model on a batch of problems and saves the model to a new_model_id
+            #  read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
+
+            if self.model_id.endswith("-lora"):
+                peft_config = PeftConfig.from_pretrained(self.model_id)
+                base_model_id = peft_config.base_model_name_or_path
+                base_model_revision = self.revision
+            else:
+                base_model_id = self.model_id
+                base_model_revision = self.revision
+
+            self.unload_model()
+
+            base_model = self.load_base_model(base_model_id, base_model_revision)
+            base_tokenizer = AutoTokenizer.from_pretrained(base_model_id, revision=base_model_revision, use_fast=False)
+            # base_tokenizer.pad_token = base_tokenizer.eos_token
+            base_tokenizer.padding_side = "right"
+            logger.info(f"Training with model: {base_model_id} revision: {str(base_model_revision)}")
+
+            if train_eos:
+                base_tokenizer.add_tokens(["<|endoftext|>"])
+                base_tokenizer.add_special_tokens(dict(eos_token="<|endoftext|>"))
+                modules_to_save = ["embed_tokens", "lm_head"]
+                lr = lr / 10
+            else:
+                modules_to_save = []
+
+            base_model.config.eos_token_id = base_tokenizer.eos_token_id
+
+            base_tokenizer.pad_token = base_tokenizer.eos_token
+
+            train_problems = [[d['prompt'], d['solution']] for d in problems]
+            eval_problems = [[d['prompt'], d['solution']] for d in eval_problems]
+            train_data = self.dataset_class(train_problems, base_tokenizer, self.max_context_length)
+            eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
+
+#            train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
+#            eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
+
+            base_model.config.use_cache = False
+            base_model.config.eos_token_id = base_tokenizer.eos_token_id
+            base_model.config.pretraining_tp = 1
+
+            # gradient checkpointing to save memory
+            base_model.gradient_checkpointing_enable()
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=16,
+                target_modules=[
+                    'q_proj',
+                    'k_proj',
+                    'v_proj',
+                    'dense',
+                    'fc1',
+                    'fc2',
+                ],  # print(model) will show the modules to use
+                bias="none",
+                modules_to_save=modules_to_save,
+                lora_dropout=0.1,
+                task_type="CAUSAL_LM",
+            )
+
+            training_arguments = TrainingArguments(
+                output_dir="logs",
+                num_train_epochs=1,
+                gradient_checkpointing=True,  # ------------
+                per_device_train_batch_size=1,
+                per_device_eval_batch_size=1,
+                gradient_accumulation_steps=4,  # 4
+                optim="paged_adamw_32bit",
+                adam_beta1=0.9,  # --------
+                adam_beta2=0.95,  # -----------
+                save_steps=0,
+                logging_steps=1,
+                learning_rate=lr,
+                weight_decay=0.05,
+                fp16=False,
+                bf16=False,
+                #                fp16=not self.HAS_BFLOAT16,
+                #                bf16=self.HAS_BFLOAT16,
+                max_grad_norm=0.3,
+                max_steps=-1,
+                warmup_ratio=0.03,
+                group_by_length=False,
+                lr_scheduler_type="cosine",
+                report_to="tensorboard",
+                evaluation_strategy="epoch",
+            )
+
+            trainer = SFTTrainer(
+                model=base_model,
+                train_dataset=train_data,
+                eval_dataset=eval_data,
+                peft_config=config,
+                tokenizer=base_tokenizer,
+                args=training_arguments,
+                packing=False,
+                dataset_text_field="text",
+                max_seq_length=self.max_context_length,
+            )
+
+            trainer.train()
+
+            if not new_model_id.endswith("-lora"):
+                new_model_id = new_model_id + "-lora"
+            self.model_id = new_model_id
+            self.tokenizer = base_tokenizer
+            trainer.model.config.revision = base_model_revision
+            trainer.model.save_pretrained(new_model_id)
+            base_tokenizer.save_pretrained(new_model_id)
+            self.model = trainer.model
+            self.model.eval()
+            if merge:
+                if self.use_quantization:  # TODO: implement merging in quantization mode
+                    logger.warning("Merging is not supported in quantization mode")
+                self.merge_lora()
+
+
+    def train1(self, problems, eval_problems, new_model_id, lr = 1e-4, merge = False, train_eos = False, use_dpo = False):
         # trains with a lora model on a batch of problems and saves the model to a new_model_id
         #  read the docs at https://huggingface.co/docs/trl/sft_trainer for more info
 
@@ -241,7 +361,10 @@ class MathLLM:
             base_tokenizer.pad_token = base_tokenizer.eos_token
 
             if not use_dpo:
-                train_data = self.dataset_class(problems, base_tokenizer, self.max_context_length)
+                # convert problems dict to list of [question, answer] pairs
+                train_problems = [[d['prompt'], d['solution']] for d in problems]
+                eval_problems = [[d['prompt'], d['solution']] for d in eval_problems]
+                train_data = self.dataset_class(train_problems, base_tokenizer, self.max_context_length)
                 eval_data = self.dataset_class(eval_problems, base_tokenizer, self.max_context_length)
             else:
                 #save problems to temp file:
@@ -323,21 +446,33 @@ class MathLLM:
                 report_to="tensorboard",
                 evaluation_strategy="epoch",
             )
-
-            trainer = DPOTrainer(
-                model=base_model,
-                ref_model = None,
-                train_dataset=train_data,
-                eval_dataset=eval_data,
-                peft_config=config,
-                tokenizer=base_tokenizer,
-                args=training_arguments,
-#                dataset_text_field="text",
-                max_prompt_length=512,
-                max_length=2048,
-                beta = 0.1,
-                loss_type="hinge"
-            )
+            if use_dpo:
+                trainer = DPOTrainer(
+                    model=base_model,
+                    ref_model = None,
+                    train_dataset=train_data,
+                    eval_dataset=eval_data,
+                    peft_config=config,
+                    tokenizer=base_tokenizer,
+                    args=training_arguments,
+    #                dataset_text_field="text",
+                    max_prompt_length=512,
+                    max_length=2048,
+                    beta = 0.1,
+                    loss_type="hinge"
+                )
+            else:
+                trainer = SFTTrainer(
+                    model=base_model,
+                    train_dataset=train_data,
+                    eval_dataset=eval_data,
+                    peft_config=config,
+                    tokenizer=base_tokenizer,
+                    args=training_arguments,
+                    packing=False,
+                    dataset_text_field="text",
+                    max_seq_length=self.max_context_length,
+                )
 
             trainer.train()
 
