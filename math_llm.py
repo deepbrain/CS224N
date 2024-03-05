@@ -29,7 +29,7 @@ import torch
 from loguru import logger
 import asyncio
 from functools import partial
-from tokenized_dataset import TokenizedDataset, TokenizedQADataset
+from tokenized_dataset import TokenizedDataset, TokenizedQADataset, QADataCollator
 from evaluation import evaluate_on_nlp_tasks
 BASE_PHI_REVISION = "accfee56d8988cae60915486310362db5831b1bd"
 from numba import cuda
@@ -339,7 +339,10 @@ class MathLLM:
                     beta = 0.1,
                     loss_type="hinge"
                 )
-            else:
+            else: # SFT training
+                data_collator = None
+                if self.dataset_class == TokenizedQADataset:
+                    data_collator = QADataCollator(base_tokenizer)
                 trainer = SFTTrainer(
                     model=base_model,
                     train_dataset=train_data,
@@ -350,6 +353,7 @@ class MathLLM:
                     packing=False,
                     dataset_text_field="text",
                     max_seq_length=self.max_context_length,
+                    data_collator=data_collator,
                 )
             trainer.train()
 
