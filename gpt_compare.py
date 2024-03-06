@@ -6,6 +6,7 @@ from loguru import logger
 import logging
 import tiktoken
 import numpy as np
+import time
 
 class GPT:
     def __init__(
@@ -35,7 +36,7 @@ class GPT:
         else:
             self.prompt = prompt
 
-    def ask_openai2(self, message, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, **query_kwargs):
+    def ask_openai2(self, message, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, timeout=60, **query_kwargs):
         """
         * message: is basically what's sent to GPT as a prompt for it to give us a response back.
         * the other args are just overrides to the query parameters of the gpt model
@@ -56,14 +57,14 @@ class GPT:
                     future = executor.submit(self.client.completions.create, model=model, prompt=prompt,
                                              temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty,
                                              presence_penalty=presence_penalty, max_tokens=1000, **query_kwargs)
-                    response = future.result(timeout=60)  # Timeout set for 60 seconds
+                    response = future.result(timeout=timeout)  # Timeout set for 60 seconds
                     return response.choices[0].text
             else:
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(self.client.chat.completions.create, model=model, messages=prompt,
                                              temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty,
                                              presence_penalty=presence_penalty, max_tokens=1000, **query_kwargs)
-                response = future.result(timeout=60)  # Timeout set for 60 seconds
+                response = future.result(timeout=timeout)  # Timeout set for 60 seconds
                 return response.choices[0].message.content
         except concurrent.futures.TimeoutError:
             logger.error(f"Timeout Error")
@@ -110,13 +111,16 @@ class RephraseGPT(GPT):
         elif "gpt-4" in self.model: tokenizer_id = "gpt-4"
         enc = tiktoken.encoding_for_model(tokenizer_id)
         occurrences = {}
-        for text in texts:
+        for i, text in enumerate(texts):
             text_enc = enc.encode(text)
             for tok in set(text_enc):
                 if tok not in occurrences:
                     occurrences[tok]=0
-                occurrences[tok] += 1
+                occurrences[tok] += (1 if i > 0 else 3)
         penalty = {tok:-np.log(occ+1)*penalty_multiplier for tok, occ in occurrences.items()}
+        sorted_penalties = sorted(penalty.items(), key=lambda item: item[1])
+        sorted_penalties = sorted_penalties[:300] # API only allows 300
+        penalty = {k:v for k,v in sorted_penalties}
         return penalty
 
     def ask_openai2(self, prompt=None, problem=None, model=None, temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, **query_kwargs):
@@ -132,14 +136,27 @@ class RephraseGPT(GPT):
         results = []
         if prompt is None:
             assert problem is not None
-            for i in range(num_samples):
-                repetition_penalty_dict = self.get_repetition_penalty_dict([problem] + results, repetition_penalty_multiplier)
-                results.append(self.ask_openai2(problem=problem, **kwargs, logit_bias=repetition_penalty_dict))
+            new_kwargs = dict(problem=problem)
+            orig_text = problem
         elif problem is None:
             assert prompt is not None
-            for i in range(num_samples):
-                repetition_penalty_dict = self.get_repetition_penalty_dict([prompt] + results, repetition_penalty_multiplier)
-                results.append(self.ask_openai2(prompt=prompt, **kwargs, logit_bias=repetition_penalty_dict))
+            new_kwargs = dict(prompt=prompt)
+            orig_text = prompt
+ 
+        new_kwargs.update(kwargs)
+        for i in range(num_samples):
+            repetition_penalty_dict = self.get_repetition_penalty_dict([orig_text] + results, repetition_penalty_multiplier)
+            for j in range(3):
+                res = self.ask_openai2(**new_kwargs, timeout=15, logit_bias=repetition_penalty_dict)
+                if res is None:
+                    time.sleep(5) # sleep a bit and try again
+                    res = self.ask_openai2(**new_kwargs, timeout=15, logit_bias=repetition_penalty_dict)
+
+                if len(res) < len(orig_text) * 2.5:
+                    break
+            if len(res) >= len(orig_text) * 2.5:
+                return results
+            results.append(res)
         return results
 
 class MathGPT(GPT):

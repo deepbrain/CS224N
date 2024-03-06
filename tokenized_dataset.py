@@ -2,6 +2,8 @@ from loguru import logger
 import numpy as np
 from torch.utils.data import Dataset
 import random
+from transformers.data.data_collator import DataCollatorMixin
+import torch
 
 
 class TokenizedDataset(Dataset):
@@ -140,3 +142,29 @@ class TokenizedQADataset(TokenizedDataset):
         self.packed_data = self.data.copy()
 
 #        self.pack(64)
+
+class QADataCollator(DataCollatorMixin):
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        self.return_tensors = "pt"
+
+    def fill(self, tens, mx_len, val):
+        extras = mx_len - len(tens)
+        extras = torch.ones(extras, dtype=tens.dtype) * val
+        return torch.concat([tens, extras])
+    
+    def torch_call(self, batch):
+        inp_ids = [torch.from_numpy(b["input_ids"]) for b in batch]
+        labels = [torch.from_numpy(b["labels"]) for b in batch]
+        mask = [torch.from_numpy(b["attention_mask"]) for b in batch]
+        mx_len = max(map(len, inp_ids))
+        
+        inp_ids = [self.fill(x, mx_len, self.tokenizer.eos_token_id) for x in inp_ids]
+        labels = [self.fill(x, mx_len, -100) for x in labels]
+        mask = [self.fill(x, mx_len, 1) for x in mask]
+        batch = {
+            "input_ids":torch.stack(inp_ids),
+            "labels":torch.stack(labels),
+            "attention_mask":torch.stack(mask)
+        }
+        return batch

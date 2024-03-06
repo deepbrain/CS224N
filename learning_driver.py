@@ -477,6 +477,8 @@ def load_solutions(filename="all_samples1.txt"):
     return problems, hesitant_problems
 
 
+
+
 if __name__ == '__main__':
 #    p, hp = load_solutions()
     mp.set_start_method('spawn')
