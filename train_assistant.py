@@ -10,7 +10,6 @@ import multiprocessing as mp
 from loguru import logger
 import random
 
-
 def get_assistant_dataset():
     prompts_dataset = list(pd.read_pickle("prompt_dataset.pkl").items())
     problem_dataset = list(pd.read_pickle("problem_1k_dataset.pkl").items())
@@ -29,7 +28,6 @@ def get_assistant_dataset():
     train_prompts_dataset = process_dataset(train_prompts_dataset, "Rephrase the following prompt:")
     eval_prompts_dataset = process_dataset(eval_prompts_dataset, "Rephrase the following prompt:")
 
-    perc_train = 0.9
     train_problem_dataset = problem_dataset[:int(len(problem_dataset)*perc_train)]
     eval_problem_dataset = problem_dataset[int(len(problem_dataset)*perc_train):]
     train_problem_dataset = process_dataset(train_problem_dataset, "Rephrase the following problem:")
