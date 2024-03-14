@@ -1,3 +1,5 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
+
 #prevent the local variables from being imported into the remote environment as they can cuase crashes
 from multiprocessing import Process, Queue
 import multiprocessing as mp

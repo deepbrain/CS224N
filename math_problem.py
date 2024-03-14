@@ -1,3 +1,5 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
+
 import numpy as np
 from loguru import logger
 from code_interpreter import compute_result, INVALID_ANSWER, crop_solution, valStr, trace_valid

@@ -1,3 +1,5 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
+
 import os
 try:
     token = os.environ["HF_API_TOKEN"]

@@ -1,3 +1,4 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
 import huggingface_hub
 import os
 try:

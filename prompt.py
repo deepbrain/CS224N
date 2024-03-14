@@ -1,3 +1,5 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
+
 import numpy as np
 from loguru import logger
 # from prompts.prompt_generators import get_all_generated_prompts

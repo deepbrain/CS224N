@@ -1,3 +1,4 @@
+# (C) 2024 Stanford CS224N Group Custom Project by Artyom Shaposhnikov, Shubhra Mishra, Roberto Garcia
 from lm_eval import evaluator
 from lm_eval.tasks import TaskManager
 from lm_eval.api.registry import MODEL_REGISTRY
