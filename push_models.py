@@ -1,3 +1,4 @@
+import huggingface_hub
 import os
 try:
     token = os.environ["HF_API_TOKEN"]
@@ -10,7 +11,6 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 from math_llm import MathLLM
 
 def upload():
-    import huggingface_hub
     huggingface_hub.logout()
     huggingface_hub.login(token=token)
     model = MathLLM("trained_iter_20240214-181649", use_vllm=False, load=True)
