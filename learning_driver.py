@@ -23,7 +23,7 @@ from code_interpreter import INVALID_ANSWER
 
 
 class ModelManager:
-    def __init__(self, model_id, start_from = 0, num_samples = -1, inference_batch_size=32, problem_batch_size=32, use_rephrased_problems=True):
+    def __init__(self, model_id, start_from = 0, num_samples = -1, inference_batch_size=32, problem_batch_size=32, use_rephrased_problems=False):
         self.use_rephrased_problems = use_rephrased_problems
         self.inference_batch_size = inference_batch_size #inference batch size
         self.batch_size = problem_batch_size
@@ -69,7 +69,7 @@ class ModelManager:
             if p['question'] not in problems_dict:
                 problems_dict[p['question'].strip()] = p
         self.rephrased_problems = []
-        with open("problem_sample_rephrases_high_temp.txt", 'r', encoding='utf-8') as file:
+        with open("problem_samples_rephrases.txt", 'r', encoding='utf-8') as file:
             for line in file:
                 js = json.loads(line)
                 question = js['problem']
@@ -83,6 +83,10 @@ class ModelManager:
         if self.use_rephrased_problems:
             self.load_rephrased_problems()
             self.batches = [self.rephrased_problems[i:i + self.batch_size] for i in range(0, len(self.rephrased_problems), self.batch_size)]
+            self.test_batches = self.batches
+            self.test_batch_index = 0
+            self.batch_index = 0
+            return self.batches
         else:
             logger.info(f"Batching {num_samples} samples starting from {start_from}")
             train_problems = self.train_problems[start_from:start_from+num_samples]
@@ -291,7 +295,7 @@ class ModelManager:
         start_from = 0
         inference_batch_size = self.num_samples
         for i in range(100):
-            do_test =  i != 0
+            do_test = True
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
             start_from += inference_batch_size
             if start_from > (len(self.train_problems) - inference_batch_size):
@@ -369,12 +373,108 @@ class ModelManager:
         random.shuffle(train_samples)
         return train_samples
 
+
+    def load_all_solutions(self):
+        train_samples = []
+        problems = {}
+        total_samples = 0
+        total_problems = 0
+        def process_line(line, embedded_prompt = False):
+            nonlocal problems, total_samples, total_problems
+            sample = json.loads(line.strip())
+            if embedded_prompt:
+                solution = {'solution': sample['solution'], 'prompt': sample['prompt']}
+            else:
+                solution = {'solution': sample['solution'], 'prompt': sample['prompt'] % sample['problem']}
+
+            problem = sample['problem'].strip()
+            if problem in problems:
+                if solution in problems[problem]:
+                    return
+                else:
+                    problems[problem].append(solution)
+                    total_samples += 1
+            else:
+                problems[problem] = [solution]
+                total_problems += 1
+
+
+        with open('train_samples_rephrase2.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+        with open('train_samples_rephrase_ht2.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+
+        with open("train_samples_via_temp1.txt", 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+
+        with open("train_samples_rephrase_ht1.txt", 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+        with open("train_samples_temp.txt", 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+        with open('train_samples_rephrase1.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+
+
+        with open("train_samples_via_temp.txt", 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+        with open('train_rephrase.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+        with open('train_samples_rephrase_ht.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line)
+
+
+        with open("all_samples1.txt", 'r', encoding='utf-8') as file:
+            for line in file:
+                process_line(line, True)
+
+        logger.info(f"Loaded {total_samples} samples, {total_problems} problems")
+
+        train_samples = []
+        for problem in problems:
+            prompts = {}
+            for solution in problems[problem]:
+                prompt = solution['prompt']
+                if prompt in prompts:
+                    prompts[prompt].append(solution)
+                else:
+                    prompts[prompt] = [solution]
+            for prompt in prompts:
+                solutions = prompts[prompt]
+                if len(solutions) > 1:
+                    idx = random.randint(0, len(solutions) - 1)
+                    train_samples.append(solutions[idx])
+                else:
+                    train_samples.append(solutions[0])
+        #randomly shuffle the train samples
+        random.shuffle(train_samples)
+        return train_samples
+
+
+
     def archive_solutions(self, filename="train_samples.txt"):
+        return
         if os.path.exists(filename):
             os.rename(filename, filename + '-' + self.iteration)
 
     def train(self):
-        train_samples = self.load_solutions()
+        train_samples = self.load_all_solutions()
         eval_samples = train_samples[len(train_samples)-self.batch_size*2:]
 #        train_samples = train_samples[:len(train_samples)-self.batch_size*2]
         self.iteration = time.strftime("%Y%m%d-%H%M%S")
@@ -385,11 +485,11 @@ class ModelManager:
         self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
         train_eos = False
         if self.MathLLM.model_id == "microsoft/phi-2":
-            the_samples = train_samples[:len(train_samples)//4]
+            the_samples = train_samples[:len(train_samples)//32]
             train_eos = True
         else:
             the_samples = train_samples
-        self.MathLLM.train(the_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=train_eos)
+        self.MathLLM.train(the_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 5e-5, merge = True, train_eos=train_eos)
         if train_eos:
             self.iteration = time.strftime("%Y%m%d-%H%M%S")
             self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=False)
@@ -484,6 +584,10 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager("trained_iter_20240228-143842", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("microsoft/phi-2", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240214-181649", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240215-134533", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+    model_manager = ModelManager("trained_iter_20240309-070712", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#model_manager.load_all_solutions()
     #run the process_queue method in the background
     asyncio.run(model_manager.run())

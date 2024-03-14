@@ -304,7 +304,7 @@ class MathLLM:
                 output_dir="logs",
                 num_train_epochs=1,
                 gradient_checkpointing=True, #------------
-                per_device_train_batch_size=4 if use_dpo else 1,
+                per_device_train_batch_size=1 if use_dpo else 1,
                 per_device_eval_batch_size=1,
                 gradient_accumulation_steps=4 if use_dpo else 16,  # 4
                 optim="paged_adamw_32bit",
@@ -431,6 +431,9 @@ class MathLLM:
         self.unload_model()
 #        self.load_model(new_model_id, self.revision)
 
+    def push_to_hub(self, name):
+        self.model.push_to_hub(name)
+        self.tokenizer.push_to_hub(name)
 
 
     def get_embeddings(self, problems): #returns embeddings for a batch of problems

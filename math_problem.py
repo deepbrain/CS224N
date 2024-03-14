@@ -83,22 +83,22 @@ class Problem:
     async def solve(self, prompts, solution_class=Solution, is_test = False):
         self.is_learning_sample = False
         for p in prompts:
-            if len(self.rephasings) > 0:
+            if False: #len(self.rephasings) > 0:
                 for i in range(10):
                     if f'rephrase{i}' in self.rephasings:
                         rephrasing = self.rephasings[f'rephrase{i}']
                         self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % rephrasing, is_test))
             self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % self.question, is_test))
-        tasks = [asyncio.create_task(solution.solve(temperature = 0.5)) for solution in self.solutions]
-        answers = await asyncio.gather(*tasks)
+#        tasks = [asyncio.create_task(solution.solve(temperature = 0.5)) for solution in self.solutions]
+#        answers = await asyncio.gather(*tasks)
 
-#        Temp = 0.3
-#        for i in range(5):
-#            tasks = [asyncio.create_task(solution.solve(temperature = Temp)) for solution in self.solutions]
-#            answers = await asyncio.gather(*tasks)
-#            if is_test:
-#                return
-#            Temp += 0.1
+        Temp = 1
+        for i in range(5):
+            tasks = [asyncio.create_task(solution.solve(temperature = Temp)) for solution in self.solutions]
+            answers = await asyncio.gather(*tasks)
+            if is_test:
+                return
+            Temp += 0.1
         answer_counts = {}
         for s in self.solutions:
             for a in s.answers:
