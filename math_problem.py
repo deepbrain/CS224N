@@ -9,7 +9,7 @@ import re
 import traceback
 
 class Solution:
-    def __init__(self, problem, model_manager, prompt, full_prompt, is_test):
+    def __init__(self, problem, model_manager, prompt, full_prompt):
         self.problem = problem
         self.model_manager = model_manager
         self.prompt = prompt
@@ -17,7 +17,6 @@ class Solution:
         self.solutions = []
         self.answers = []
         self.traces = []
-        self.is_test = is_test
 
     async def solve(self, temperature):
         self.solution = await self.model_manager.get_completion(self.full_prompt, max_tokens=1000, temperature = temperature, completion_only=True)
@@ -82,25 +81,26 @@ class Problem:
         rephrased_problems = await asyncio.gather(*tasks)
         result = [Problem(self.model_manager, p, self.ground_answer, self.ground_numeric_answer, 1+i) for i, p in enumerate(rephrased_problems)]
 
-    async def solve(self, prompts, solution_class=Solution, is_test = False):
+    async def solve(self, prompts, solution_class=Solution, method = 'temperature'):
         self.is_learning_sample = False
         for p in prompts:
-            if len(self.rephasings) > 0:
-                for i in range(10):
+            if (method == 'rephrase') and len(self.rephasings) > 0:
+                for i in range(20):
                     if f'rephrase{i}' in self.rephasings:
                         rephrasing = self.rephasings[f'rephrase{i}']
-                        self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % rephrasing, is_test))
-            self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % self.question, is_test))
-        tasks = [asyncio.create_task(solution.solve(temperature = 0.5)) for solution in self.solutions]
+                        self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % rephrasing))
+            self.solutions.append(solution_class(self, self.model_manager, p, p.get_prompt() % self.question))
+        tasks = [asyncio.create_task(solution.solve(temperature = 0.3)) for solution in self.solutions]
         answers = await asyncio.gather(*tasks)
+        if method == 'test':
+            return
 
-        Temp = 1
-        for i in range(5):
-            tasks = [asyncio.create_task(solution.solve(temperature = Temp)) for solution in self.solutions]
-            answers = await asyncio.gather(*tasks)
-            if is_test:
-                return
-            Temp += 0.1
+        if method == 'temperature':
+            Temp = 0.3
+            for i in range(5):
+                tasks = [asyncio.create_task(solution.solve(temperature = Temp)) for solution in self.solutions]
+                answers = await asyncio.gather(*tasks)
+                Temp += 0.1
         answer_counts = {}
         for s in self.solutions:
             for a in s.answers:
@@ -112,8 +112,8 @@ class Problem:
 
         self.all_samples = []
         for solution in self.solutions:
-            for s,a in zip(solution.solutions, solution.answers):
-                self.model_manager.add_all_sample({'problem' : self.question, 'prompt' : solution.get_train_prompt(), 'solution' : solution.get_train_solution(s), 'answer' : str(a), 'ground_numeric_answer' : self.ground_numeric_answer})
+            for s,a, trace in zip(solution.solutions, solution.answers, solution.traces):
+                self.model_manager.add_all_sample({'problem' : self.question, 'prompt' : solution.get_train_prompt(), 'solution' : solution.get_train_solution(s), 'traces' : trace, 'answer' : str(a), 'ground_numeric_answer' : self.ground_numeric_answer})
 
         self.samples = []
         if len(answer_counts) == 0:
@@ -129,12 +129,12 @@ class Problem:
             self.create_dpo_samples(answer_counts)
             return
 
-        self.evaluate_solutions(answer_counts)
+        self.evaluate_solutions(answer_counts, method)
 
 
         return # training on the same prompt
 
-    def evaluate_solutions(self, answer_counts):
+    def evaluate_solutions(self, answer_counts, method):
         try:
             traces = {}
             last_traces = {}
@@ -179,10 +179,48 @@ class Problem:
                 ac.append((answer_counts[a], l, ll, a))
             #sort ac by decending answer counts key
             ac.sort(reverse=True)
+
+
             self.is_learning_sample = False
             self.learning_sample_correct = True
             train_samples = []
             self.best_answer = ac[0][3]
+
+            if (self.best_answer < 0) or ((self.best_answer - round(self.best_answer)) != 0) or (len(ac) > 30):
+                return
+
+            if method == 'cross':
+                if ac[0][0] > 4: #cross prompt training
+                    train_prompts = []
+                    for solution in self.solutions:
+                        for s, a in zip(solution.solutions, solution.answers):
+                            if a != self.best_answer:
+                                train_prompts.append(solution.get_train_prompt())
+                    if train_prompts != []:
+                        for solution in self.solutions:
+                            for s, a in zip(solution.solutions, solution.answers):
+                                if a == self.best_answer:
+                                    train_prompt = train_prompts[random.randint(0, len(train_prompts)-1)]
+                                    train_samples.append({'problem': self.question, 'prompt': train_prompt,
+                                                      'solution': solution.get_train_solution(s), 'answer': a,
+                                                      'ground_numeric_answer': self.ground_numeric_answer})
+                    if len(train_samples) > 0:
+                        train_sample = train_samples[random.randint(0, len(train_samples)-1)]
+                        self.model_manager.add_train_sample(train_sample)
+                return
+
+            if method == 'temperature':
+                if ac[0][0] > 25:
+                    for solution in self.solutions:
+                        for s, a in zip(solution.solutions, solution.answers):
+                            if a == self.best_answer:
+                                prompt = solution.get_train_prompt()
+                                ts = {'problem': self.question, 'prompt': prompt,
+                                                      'solution': solution.get_train_solution(s), 'answer': a,
+                                                      'ground_numeric_answer': self.ground_numeric_answer}
+                                self.model_manager.add_train_sample(ts)
+                return
+
             if (self.best_answer >= 0) and ((self.best_answer - round(self.best_answer)) == 0) and (len(ac) < 30):
                 if len(ac) >= 2: #select problems with some indeterminancy in answers
                     if ac[0][0] >= 2*ac[1][0]: #one solution must dominate the others
@@ -218,7 +256,7 @@ class Problem:
             #save hard problems for later analysis
             self.problem_samples = []
             do_sample = (self.best_answer < 0) or ((self.best_answer - round(self.best_answer)) != 0)
-            if do_sample or (total_valid < 0.5 * total) or (len(ac) >= 2 and ac[0][0] < 2*ac[1][0]) or (len(ac) >= 2 and ac[0][1] < 2*ac[1][1]) or (len(ac) >= 7):
+            if do_sample or (total_valid < 0.5 * total) or (len(ac) >= 2 and ac[0][0] < 2*ac[1][0]) or (len(ac) >= 2 and ac[0][1] < 2*ac[1][1]) or (len(ac) >= 14):
                 self.model_manager.add_problem_sample(self.question)
         except Exception as e:
             logger.error(f"Error in problem evaluation: {e}, stack: {traceback.format_exc()}")

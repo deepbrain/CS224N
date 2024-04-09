@@ -48,6 +48,7 @@ class MathLLM:
     def __init__(
         self,
         model_id,
+        model_type,
         revision = None,
         use_quantization = False,
         use_vllm = False,
@@ -57,6 +58,7 @@ class MathLLM:
     ):
         if not model_id.startswith("microsoft/phi-2"):
             revision = None
+        self.model_type = model_type
         self.model_id = model_id
         self.revision = revision
         self.use_quantization = use_quantization
@@ -123,7 +125,7 @@ class MathLLM:
             self.tokenizer = None
 
     def load_model_vllm(self, model_name, base_model_revision):
-        self.model = LLM(model=model_name, revision=base_model_revision, gpu_memory_utilization=0.75)
+        self.model = LLM(model=model_name, revision=base_model_revision, gpu_memory_utilization=0.75, max_model_len = 2048)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=base_model_revision, trust_remote_code=True, use_fast=True)
         return self.model, self.tokenizer
 
@@ -284,23 +286,44 @@ class MathLLM:
             # gradient checkpointing to save memory
             base_model.gradient_checkpointing_enable()
 
-            config = LoraConfig(
-                r=16,
-                lora_alpha=16,
-                target_modules=[
-                    'q_proj',
-                    'k_proj',
-                    'v_proj',
-                    'dense',
-                    'fc1',
-                    'fc2',
-                ],  # print(model) will show the modules to use
-                bias="none",
-                modules_to_save = modules_to_save,
-                lora_dropout=0.1,
-                task_type="CAUSAL_LM",
-            )
 
+            if self.model_type == "phi-2":
+                config = LoraConfig(
+                    r=16,
+                    lora_alpha=16,
+                    target_modules=[
+                        'q_proj',
+                        'k_proj',
+                        'v_proj',
+                        'dense',
+                        'fc1',
+                        'fc2',
+                    ],  # print(model) will show the modules to use
+                    bias="none",
+                    modules_to_save = modules_to_save,
+                    lora_dropout=0.1,
+                    task_type="CAUSAL_LM",
+                )
+            elif self.model_type == "mistral":
+                config = LoraConfig(
+                    r=16,
+                    lora_alpha=16,
+                    target_modules=[
+                        'q_proj',
+                        'k_proj',
+                        'v_proj',
+                        'o_proj',
+                        'gate_proj',
+                        'up_proj',
+                        'down_proj',
+                    ],
+                    bias="none",
+                    modules_to_save=modules_to_save,
+                    lora_dropout=0.1,
+                    task_type="CAUSAL_LM",
+                )
+            else:
+                raise ValueError("Invalid model type, please specify target_modules for the model type")
 
             training_arguments = TrainingArguments(
                 output_dir="logs",
@@ -359,33 +382,6 @@ class MathLLM:
                     dataset_text_field="text",
                     max_seq_length=self.max_context_length,
                     data_collator=data_collator,
-                )
-            if use_dpo:
-                trainer = DPOTrainer(
-                    model=base_model,
-                    ref_model = None,
-                    train_dataset=train_data,
-                    eval_dataset=eval_data,
-                    peft_config=config,
-                    tokenizer=base_tokenizer,
-                    args=training_arguments,
-    #                dataset_text_field="text",
-                    max_prompt_length=512,
-                    max_length=2048,
-                    beta = 0.1,
-                    loss_type="hinge"
-                )
-            else:
-                trainer = SFTTrainer(
-                    model=base_model,
-                    train_dataset=train_data,
-                    eval_dataset=eval_data,
-                    peft_config=config,
-                    tokenizer=base_tokenizer,
-                    args=training_arguments,
-                    packing=False,
-                    dataset_text_field="text",
-                    max_seq_length=self.max_context_length,
                 )
 
             trainer.train()

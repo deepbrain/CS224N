@@ -25,8 +25,8 @@ from code_interpreter import INVALID_ANSWER
 
 
 class ModelManager:
-    def __init__(self, model_id, start_from = 0, num_samples = -1, inference_batch_size=32, problem_batch_size=32, use_rephrased_problems=False):
-        self.use_rephrased_problems = use_rephrased_problems
+    def __init__(self, model_id, model_type, start_from = 0, num_samples = -1, inference_batch_size=32, problem_batch_size=32, method = 'cross'):
+        self.method = method
         self.inference_batch_size = inference_batch_size #inference batch size
         self.batch_size = problem_batch_size
         self.test_problems = get_examples("test")
@@ -35,12 +35,12 @@ class ModelManager:
             num_samples = len(self.train_problems) // 2
         self.num_samples = num_samples
         self.model_id = model_id
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
+        self.model_type = model_type
+        self.MathLLM = MathLLM(model_id, model_type, use_vllm=True, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
         self.queue = deque()
         self.shuffle_and_batch(start_from, num_samples)
         self.prompts = get_old_prompts()
         self.problems = []
-        self.test = False
         self.learning_iteration = 0
         self.code_interpreter_lock = asyncio.Lock()
 
@@ -71,18 +71,57 @@ class ModelManager:
             if p['question'] not in problems_dict:
                 problems_dict[p['question'].strip()] = p
         self.rephrased_problems = []
-        with open("problem_samples_rephrases.txt", 'r', encoding='utf-8') as file:
+        if self.model_type == 'mistral':
+            LT = "mistral_problem_samples_rephrases_low_temp.txt"
+            HT = "mistral_problem_samples_rephrases_high_temp.txt"
+        else:
+            LT = "problem_samples_rephrases_low_temp.txt"
+            HT = "problem_samples_rephrases_high_temp.txt"
+        lines = []
+        with open(LT, 'r', encoding='utf-8') as file:
             for line in file:
-                js = json.loads(line)
-                question = js['problem']
-                problem = problems_dict[question.strip()]
-                # extend the problem dict with the rephrased problems in js['rephrase0']..js['rephrase9'] if exsists:
-                problem.update(js)
-                self.rephrased_problems.append(problem)
+                lines.append(line)
+        with open(HT, 'r', encoding='utf-8') as file:
+            for line in file:
+                lines.append(line)
+        for line in lines:
+            js = json.loads(line)
+            question = js['problem']
+            problem = problems_dict[question.strip()]
+
+            # Collect existing rephrases to ensure uniqueness
+            existing_rephrases = {problem[key] for key in problem if key.startswith('rephrase')}
+
+            # Identify the highest existing rephrase key number in the problem dictionary
+            highest_number = -1
+            for key in problem.keys():
+                if key.startswith('rephrase'):
+                    num = int(key.replace('rephrase', ''))
+                    highest_number = max(highest_number, num)
+
+            # Extend the problem dict with the rephrased problems in js
+            for key, value in js.items():
+                if key.startswith('rephrase') and value not in existing_rephrases:
+                    # Since this is a new unique rephrase, add it to existing_rephrases set
+                    existing_rephrases.add(value)
+
+                    # Check if this rephrase key is already present, if so, find a new unique key
+                    if key in problem:
+                        highest_number += 1
+                        new_key = f'rephrase{highest_number}'
+                        problem[new_key] = value
+                    else:
+                        # This ensures even if the rephrase key from js isn't directly used, it's unique
+                        highest_number += 1
+                        new_key = f'rephrase{highest_number}'
+                        problem[new_key] = value
+
+        for problem in problems_dict:
+            self.rephrased_problems.append(problems_dict[problem])
 
 
     def shuffle_and_batch(self, start_from, num_samples):
-        if self.use_rephrased_problems:
+        if self.method == 'rephrase' or self.method == 'rephrase_test':
             self.load_rephrased_problems()
             self.batches = [self.rephrased_problems[i:i + self.batch_size] for i in range(0, len(self.rephrased_problems), self.batch_size)]
             self.test_batches = self.batches
@@ -99,7 +138,7 @@ class ModelManager:
         return self.batches
 
     async def create_problems(self):
-        if self.test:
+        if self.method == 'test':
             if self.test_batch_index >= len(self.test_batches):
                 return []
             selected_problems = self.test_batches[self.test_batch_index]
@@ -125,17 +164,17 @@ class ModelManager:
 
 
     async def generate_solutions(self, solution_class, problems, dataset_problems): #generates multiple solutions for each problem by varying prompts
-        tasks = [asyncio.create_task(problem.solve(self.prompts, solution_class, self.test)) for problem in problems]
+        tasks = [asyncio.create_task(problem.solve(self.prompts, solution_class, self.method)) for problem in problems]
         results = await asyncio.gather(*tasks) # produces a list of lists of correctness values like [True, False, True]
         if dataset_problems:
             mean_accuracy = compute_mean_accuracy(self.problems, self.prompts)
             majority_accuracy = compute_majority_answer_accuracy(self.problems, self.prompts)
             oracle = compute_oracle_accuracy(self.problems, self.prompts)
             unsolvable_problems = find_unsolvable_problems(self.problems, self.prompts)
-            if self.test:
-                test = "test " + str(self.learning_iteration)
+            if self.method == 'test':
+                test = self.method + str(self.learning_iteration)
             else:
-                test = "train " + str(self.learning_iteration)
+                test = self.method + str(self.learning_iteration)
             logger.info(f"{test} all prompts mean accuracy: {mean_accuracy:.4f}, Majority accuracy: {majority_accuracy:.4f}, Oracle accuracy: {oracle:.4f}, problems solved: {len(self.problems)}")
 #        for rephrasing in range(0, 5):
 #            mean_accuracy = compute_mean_accuracy(self.problems, self.prompts, rephrasing)
@@ -165,8 +204,10 @@ class ModelManager:
             prompt.reset_stats()
         self.problems = []
         logger.info(f"Testing model {self.MathLLM.model_id}")
-        self.MathLLM.evaluate()
+#        self.MathLLM.evaluate()
         self.test = True
+        method = self.method
+        self.method = 'test'
         self.test_batch_index = 0
         while True:
             problems = await self.create_problems()
@@ -176,6 +217,7 @@ class ModelManager:
         logger.info(f"Testing complete for model{self.MathLLM.model_id}")
         for prompt in self.prompts:
             prompt.reset_stats()
+        self.method = method
         self.problems = []
         self.test = False
 
@@ -249,12 +291,8 @@ class ModelManager:
                 problems = await self.create_problems()
                 if len(problems) == 0:
                     dataset_problems = False
-            if not dataset_problems:
-                if total_len > 5000:
                     self.upload_solutions()
                     break
-                else:
-                    problems = await self.generate_problems() #generate new problems
             await self.generate_solutions(Solution, problems, dataset_problems)
             if dataset_problems:
                 c, t = self.compute_train_sample_accuracy(problems)
@@ -266,13 +304,12 @@ class ModelManager:
                 logger.info(f"Chosen train samples accuracy: {correct}/{total} = {correct/total:.4f}")
 
 
-
     def spawn_inference(self, start_from, num_samples, iteration, do_test, GPU=-1):
         MPqueue = Queue()
         if GPU != -1:
             bkp = os.environ["CUDA_VISIBLE_DEVICES"]
             os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        p = Process(target=run_inference, args=(self.model_id, start_from, num_samples, iteration, do_test, MPqueue))
+        p = Process(target=run_inference, args=(self.model_id, self.model_type, start_from, num_samples, iteration, do_test, self.method, MPqueue))
         p.start()
         p.join()
         if GPU != -1:
@@ -284,40 +321,64 @@ class ModelManager:
         if GPU != -1:
             bkp = os.environ["CUDA_VISIBLE_DEVICES"]
             os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        p = Process(target=run_training, args=(self.model_id, MPqueue))
+        p = Process(target=run_training, args=(self.model_id, self.model_type, self.method, MPqueue))
         p.start()
         p.join()
         if GPU != -1:
             os.environ["CUDA_VISIBLE_DEVICES"] = bkp
-        return MPqueue.get()
+        self.model_id = MPqueue.get()
+        if not self.model_id.endswith("-lora"):
+            self.model_id += "-lora"
+        self.model_id = self.spawn_merging(self.model_id)
+        return self.model_id
+
+    def spawn_merging(self, GPU=-1):
+        #sleep for 5 seconds
+        if not self.model_id.endswith("-lora"):
+            return
+        time.sleep(5)
+        MPqueue = Queue()
+        if GPU != -1:
+            bkp = os.environ["CUDA_VISIBLE_DEVICES"]
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
+        p = Process(target=run_merging, args=(self.model_id, MPqueue))
+        p.start()
+        p.join()
+        if GPU != -1:
+            os.environ["CUDA_VISIBLE_DEVICES"] = bkp
+        self.model_id = MPqueue.get()
+        return self.model_id
 
 
     def run(self):
         self.lock = asyncio.Lock()
         start_from = 0
         inference_batch_size = self.num_samples
-        for i in range(100):
-            do_test = True
+        for i in range(3):
+            do_test = i != 0
+            self.spawn_merging()
             self.spawn_inference(start_from, num_samples=inference_batch_size, iteration=i, do_test=do_test, GPU=-1)
+            if self.method == 'test':
+                return
             start_from += inference_batch_size
             if start_from > (len(self.train_problems) - inference_batch_size):
                 start_from = 0
             self.model_id = self.spawn_training()
 
     def upload_solutions(self, filename = "train_samples.txt", problem_filename = "problem_samples.txt"):
-        with open(filename, 'a', encoding='utf-8') as file:
+        with open(self.method + '_' + self.model_id + '_' + filename, 'a', encoding='utf-8') as file:
             for sample in self.train_samples:
-                js = {'problem' : sample['problem'], 'prompt': sample['prompt'],  'solution' : sample['solution']}
-                serialized_sample = json.dumps(js, ensure_ascii=False)
+#                js = {'problem' : sample['problem'], 'prompt': sample['prompt'],  'solution' : sample['solution']}
+                serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
-        with open(problem_filename, 'a', encoding='utf-8') as file:
+        with open(self.method + '_' + self.model_id + '_' +problem_filename, 'a', encoding='utf-8') as file:
             for problem in self.problem_samples:
                 problem = problem.replace('\n', ' ')
                 file.write(problem + "\n")
-        with open("all_samples1.txt", 'a', encoding='utf-8') as file:
+        with open(self.method + '_' + self.model_id + '_' + "_all_samples.txt", 'a', encoding='utf-8') as file:
             for sample in self.all_samples:
-                js = {'problem' : sample['problem'], 'prompt': sample['prompt'], 'solution' : sample['solution'], 'answer' : str(sample['answer']), 'ground_answer': sample['ground_numeric_answer']}
-                serialized_sample = json.dumps(js, ensure_ascii=False)
+#                js = {'problem' : sample['problem'], 'prompt': sample['prompt'], 'solution' : sample['solution'], 'answer' : str(sample['answer']), 'ground_answer': sample['ground_numeric_answer']}
+                serialized_sample = json.dumps(sample, ensure_ascii=False)
                 file.write(serialized_sample + "\n")
         self.train_samples = []
         self.all_samples = []
@@ -376,7 +437,7 @@ class ModelManager:
         return train_samples
 
 
-    def load_all_solutions(self):
+    def load_all_solutions(self, all = False):
         train_samples = []
         problems = {}
         total_samples = 0
@@ -399,52 +460,11 @@ class ModelManager:
             else:
                 problems[problem] = [solution]
                 total_problems += 1
+                total_samples += 1
 
-
-        with open('train_samples_rephrase2.txt', 'r', encoding='utf-8') as file:
+        with open(self.method  + '_' + self.model_id + '_train_samples.txt', 'r', encoding='utf-8') as file:
             for line in file:
                 process_line(line)
-
-        with open('train_samples_rephrase_ht2.txt', 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-
-        with open("train_samples_via_temp1.txt", 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-
-        with open("train_samples_rephrase_ht1.txt", 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-        with open("train_samples_temp.txt", 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-        with open('train_samples_rephrase1.txt', 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-
-
-        with open("train_samples_via_temp.txt", 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-        with open('train_rephrase.txt', 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-        with open('train_samples_rephrase_ht.txt', 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line)
-
-
-        with open("all_samples1.txt", 'r', encoding='utf-8') as file:
-            for line in file:
-                process_line(line, True)
 
         logger.info(f"Loaded {total_samples} samples, {total_problems} problems")
 
@@ -459,19 +479,97 @@ class ModelManager:
                     prompts[prompt] = [solution]
             for prompt in prompts:
                 solutions = prompts[prompt]
-                if len(solutions) > 1:
-                    idx = random.randint(0, len(solutions) - 1)
-                    train_samples.append(solutions[idx])
+                if all:
+                    for solution in solutions:
+                        train_samples.append(solution)
                 else:
-                    train_samples.append(solutions[0])
+                    if len(solutions) > 1:
+                        idx = random.randint(0, len(solutions) - 1)
+                        train_samples.append(solutions[idx])
+                    else:
+                        train_samples.append(solutions[0])
         #randomly shuffle the train samples
-        random.shuffle(train_samples)
+        if all:
+            #sort the train samples by prompt and solution:
+            train_samples = sorted(train_samples, key = lambda x: (x['prompt'], x['solution']))
+        else:
+            random.shuffle(train_samples)
         return train_samples
 
 
+    def load_and_filter_all_solutions(self, all = False):
+        problems = {}
+        total = 0
+        with open(self.method  + '_' + self.model_id + '_all_samples.txt', 'r', encoding='utf-8') as file:
+            for line in file:
+                total += 1
+                sample = json.loads(line.strip())
+                problem = sample['problem'].strip()
+                if problem in problems:
+                    problems[problem].append(sample)
+                else:
+                    problems[problem] = [sample]
+        logger.info(f"Loaded {total} samples")
+        train_samples = []
+        for problem in problems:
+            answer_counts = {}
+            for sample in problems[problem]:
+                a = sample['answer']
+                if a != INVALID_ANSWER:
+                    if a in answer_counts:
+                        answer_counts[a] += 1
+                    else:
+                        answer_counts[a] = 1
+            if len(answer_counts) > 0:
+                best_answer = max(answer_counts, key=answer_counts.get)
+                # compute percent of best answer in answer_counts:
+                percent = answer_counts[best_answer] / sum(answer_counts.values())
+                if answer_counts[best_answer] > 25:
+                    if self.method == 'cross':
+                        prompts = []
+                        for sample in problems[problem]:
+                            if sample['answer'] != best_answer:
+                                if sample['prompt'] not in prompts:
+                                    prompts.append(sample['prompt'])
+                        if len(prompts) > 0:
+                            for sample in problems[problem]:
+                                if sample['answer'] == best_answer:
+                                    prompt = prompts[random.randint(0, len(prompts)-1)]
+                                    train_samples.append({'prompt': prompt % sample['problem'], 'solution': sample['solution']})
+                                    break
+                    elif self.method == 'temperature':
+                        prompts = {}
+                        for sample in problems[problem]:
+                            if sample['answer'] == best_answer:
+                                if sample['prompt'] in prompts:
+                                    prompts[sample['prompt']].append(sample)
+                                else:
+                                    prompts[sample['prompt']] = [sample]
+                        if len(prompts) > 0:
+                            for prompt in prompts:
+                                if all:
+                                    for solution in prompts[prompt]:
+                                        train_samples.append({'prompt': prompt % solution['problem'], 'solution': solution['solution']})
+                                else:
+                                    solutions = prompts[prompt]
+                                    if len(solutions) > 1:
+                                        idx = random.randint(0, len(solutions) - 1)
+                                        train_samples.append({'prompt': prompt % solutions[idx]['problem'], 'solution': solutions[idx]['solution']})
+                                    elif len(solutions) == 1:
+                                        train_samples.append({'prompt': prompt % solutions[0]['problem'], 'solution': solutions[0]['solution']})
+
+        #shuffle the train samples
+        if all:
+            #sort the train samples by prompt and solution:
+            train_samples = sorted(train_samples, key = lambda x: (x['prompt'], x['solution']))
+        else:
+            random.shuffle(train_samples)
+        logger.info(f"Loaded {len(train_samples)} train samples, using method: {self.method}")
+        return train_samples
+
 
     def archive_solutions(self, filename="train_samples.txt"):
-        return
+#        return
         if os.path.exists(filename):
             os.rename(filename, filename + '-' + self.iteration)
 
@@ -484,18 +582,19 @@ class ModelManager:
         self.MathLLM.unload_model()
         del self.MathLLM
         logger.info(f"Training model {model_id} from iteration {self.iteration}")
-        self.MathLLM = MathLLM(model_id, use_vllm=True, load=False, dataset_class=TokenizedQADataset)
+        self.MathLLM = MathLLM(model_id, self.model_type, use_vllm=False, load=False, dataset_class=TokenizedQADataset)
         train_eos = False
         if self.MathLLM.model_id == "microsoft/phi-2":
             the_samples = train_samples[:len(train_samples)//32]
             train_eos = True
         else:
             the_samples = train_samples
-        self.MathLLM.train(the_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 5e-5, merge = True, train_eos=train_eos)
+        self.MathLLM.train(the_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 5e-5, merge = False, train_eos=train_eos)
         if train_eos:
             self.iteration = time.strftime("%Y%m%d-%H%M%S")
             self.MathLLM.train(train_samples, eval_samples, 'trained_iter_' + self.iteration, lr = 1e-4, merge = True, train_eos=False)
         self.archive_solutions()
+
 
     async def process_queue(self):
         while True:
@@ -530,20 +629,27 @@ class ModelManager:
             else:
                 await asyncio.sleep(0.1)
 
-def run_inference(model_name, start_from, num_samples, iteration, do_test, MPqueue):
+def run_inference(model_name, model_type, start_from, num_samples, iteration, do_test, method, MPqueue):
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager(model_name, start_from, num_samples)
+    model_manager = ModelManager(model_name, model_type, start_from, num_samples, method = method)
     asyncio.run(model_manager.run_inference(iteration, do_test))
     MPqueue.put("done")
 
-def run_training(model_name, MPqueue):
+def run_training(model_name, model_type, method, MPqueue):
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-    model_manager = ModelManager(model_name)
+    model_manager = ModelManager(model_name, model_type, method = method)
     logger.info(f"Training model {model_manager.MathLLM.model_id}")
     model_manager.train()
     MPqueue.put(model_manager.MathLLM.model_id)
+
+def run_merging(model_name, MPqueue):
+    logger.add("learning.log", rotation = "100 MB")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
+    M = MathLLM(model_name, "mistral", use_vllm=False, load=False, dataset_class=TokenizedQADataset)  # revision = BASE_PHI_REVISION
+    M.merge_lora()
+    MPqueue.put(M.model_id)
 
 
 def load_solutions(filename="all_samples1.txt"):
@@ -586,10 +692,32 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
     logger.add("learning.log", rotation = "100 MB")
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
+
+#    M = MathLLM("trained_iter_20240401-101540-lora", "mistral", use_vllm=False, load=False, dataset_class=TokenizedQADataset)  # revision = BASE_PHI_REVISION
+#    M.merge_lora()
 #    model_manager = ModelManager("microsoft/phi-2", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240214-181649", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240215-134533", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
-    model_manager = ModelManager("trained_iter_20240309-070712", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240309-070712", start_from=0, num_samples = 7473) #("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240318-090716", start_from=0, num_samples=7473, method = 'test')  # ("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240328-194728", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240401-101540", "mistral", start_from=0, num_samples=7473, method='temperature')
+    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=0, num_samples=7473, method='rephrase')
+#    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
+#    samples1 = model_manager.load_all_solutions(all=True)
+#    samples2 = model_manager.load_and_filter_all_solutions(all=True)
+#    NF = 0
+#    for sample in samples1:
+#        if sample not in samples2:
+#            NF += 1
+#    logger.info(f"Found {NF} samples in samples1 that are not in samples2")
+#    for sample in samples2:
+#        if sample not in samples1:
+#            NF += 1
+#    logger.info(f"Found {NF} samples in samples2 that are not in samples1")
+    #    model_manager = ModelManager("trained_iter_20240322-192937", start_from=0, num_samples=1024,
+#                             method='cross')  # ("trained_iter_20240220-235255", num_samples=1024)
+#    model_manager = ModelManager("trained_iter_20240323-072154", start_from=0, num_samples=7473, method='cross')
 #model_manager.load_all_solutions()
     #run the process_queue method in the background
     asyncio.run(model_manager.run())
