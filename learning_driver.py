@@ -378,8 +378,12 @@ class ModelManager:
         with open(self.method + '_' + self.model_id + '_' + "_all_samples.txt", 'a', encoding='utf-8') as file:
             for sample in self.all_samples:
 #                js = {'problem' : sample['problem'], 'prompt': sample['prompt'], 'solution' : sample['solution'], 'answer' : str(sample['answer']), 'ground_answer': sample['ground_numeric_answer']}
-                serialized_sample = json.dumps(sample, ensure_ascii=False)
-                file.write(serialized_sample + "\n")
+                try:
+                    serialized_sample = json.dumps(sample, ensure_ascii=False)
+                    file.write(serialized_sample + "\n")
+                #handle all exceptions:
+                except Exception as e:
+                    logger.info(f"Error serializing sample: {sample}, exception: {e}")
         self.train_samples = []
         self.all_samples = []
         self.problem_samples = []
@@ -702,7 +706,7 @@ if __name__ == '__main__':
 #    model_manager = ModelManager("trained_iter_20240318-090716", start_from=0, num_samples=7473, method = 'test')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240328-194728", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240401-101540", "mistral", start_from=0, num_samples=7473, method='temperature')
-    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=0, num_samples=7473, method='rephrase')
+    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=5700, num_samples=7473, method='rephrase')
 #    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    samples1 = model_manager.load_all_solutions(all=True)
 #    samples2 = model_manager.load_and_filter_all_solutions(all=True)

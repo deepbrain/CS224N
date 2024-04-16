@@ -12,7 +12,7 @@ if 'LIBRARY_ROOTS' in os.environ:
 #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 from peft import LoraConfig, PeftConfig
-from trl import SFTTrainer, DPOTrainer
+from trl import SFTTrainer #, DPOTrainer
 from transformers import (AutoModelForCausalLM,
                           AutoTokenizer,
                           BitsAndBytesConfig,
@@ -87,7 +87,7 @@ class MathLLM:
             do_sample=True,
             device_map={'': 0},
 #            attn_implementation="flash_attention_2",
-            quantization_config=self.get_bnbs_config(),
+#            quantization_config=self.get_bnbs_config(),
             torch_dtype=self.torch_dtype,
         )
 
