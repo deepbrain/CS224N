@@ -343,6 +343,7 @@ class MathLLM:
                 bf16 = False,
 #                fp16=not self.HAS_BFLOAT16,
 #                bf16=self.HAS_BFLOAT16,
+
                 max_grad_norm=0.3,
                 max_steps=-1,
                 warmup_ratio=0.03,

@@ -706,6 +706,7 @@ if __name__ == '__main__':
 #    model_manager = ModelManager("trained_iter_20240318-090716", start_from=0, num_samples=7473, method = 'test')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240328-194728", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240401-101540", "mistral", start_from=0, num_samples=7473, method='temperature')
+
     model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=5700, num_samples=7473, method='rephrase')
 #    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    samples1 = model_manager.load_all_solutions(all=True)
