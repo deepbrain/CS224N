@@ -329,7 +329,7 @@ class ModelManager:
         self.model_id = MPqueue.get()
         if not self.model_id.endswith("-lora"):
             self.model_id += "-lora"
-        self.model_id = self.spawn_merging(self.model_id)
+        self.model_id = self.spawn_merging()
         return self.model_id
 
     def spawn_merging(self, GPU=-1):
@@ -707,7 +707,8 @@ if __name__ == '__main__':
 #    model_manager = ModelManager("trained_iter_20240328-194728", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("trained_iter_20240401-101540", "mistral", start_from=0, num_samples=7473, method='temperature')
 
-    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=5700, num_samples=7473, method='rephrase')
+#    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=5700, num_samples=7473, method='rephrase')
+    model_manager = ModelManager("trained_iter_20240420-084455", 'mistral', start_from=0, num_samples=7473, method='rephrase')
 #    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    samples1 = model_manager.load_all_solutions(all=True)
 #    samples2 = model_manager.load_and_filter_all_solutions(all=True)
