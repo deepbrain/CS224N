@@ -286,7 +286,11 @@ class ModelManager:
         dataset_problems = True
         total_len = 0
 #        problems = await self.generate_problems()
+        todo_problem_batches = len(self.test_batches) if self.method == "test" else len(self.batches)
+        processed_batches = 0
+        logger.info(f"Running inference on {todo_problem_batches} problem batches")
         while True:
+            s_time = time.time()
             if dataset_problems:
                 problems = await self.create_problems()
                 if len(problems) == 0:
@@ -300,6 +304,9 @@ class ModelManager:
                 correct += c
                 total += t
             self.upload_solutions()
+            processed_batches += 1 
+            e_time = time.time() 
+            logger.info(f"Done inference on  {processed_batches}/{todo_problem_batches} problem batches, took {e_time-s_time} seconds")
             if total > 0:
                 logger.info(f"Chosen train samples accuracy: {correct}/{total} = {correct/total:.4f}")
 
