@@ -23,7 +23,6 @@ import json
 import random
 from code_interpreter import INVALID_ANSWER
 
-
 class ModelManager:
     def __init__(self, model_id, model_type, start_from = 0, num_samples = -1, inference_batch_size=32, problem_batch_size=32, method = 'cross'):
         self.method = method
@@ -36,7 +35,7 @@ class ModelManager:
         self.num_samples = num_samples
         self.model_id = model_id
         self.model_type = model_type
-        self.MathLLM = MathLLM(model_id, model_type, use_vllm=True, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
+        self.MathLLM = MathLLM(model_id, model_type, use_vllm=False, load=False, dataset_class=TokenizedQADataset) #revision = BASE_PHI_REVISION
         self.queue = deque()
         self.shuffle_and_batch(start_from, num_samples)
         self.prompts = get_old_prompts()
@@ -715,7 +714,8 @@ if __name__ == '__main__':
 #    model_manager = ModelManager("trained_iter_20240401-101540", "mistral", start_from=0, num_samples=7473, method='temperature')
 
 #    model_manager = ModelManager("trained_iter_20240404-015311", 'mistral', start_from=5700, num_samples=7473, method='rephrase')
-    model_manager = ModelManager("trained_iter_20240420-084455", 'mistral', start_from=0, num_samples=7473, method='rephrase')
+    # model_manager = ModelManager("trained_iter_20240420-084455", 'mistral', start_from=0, num_samples=7473, method='rephrase')
+    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature') # ("trained_iter_20240220-235255", num_samples=1024)
 #    model_manager = ModelManager("mistralai/Mistral-7B-Instruct-v0.1", "mistral", start_from=0, num_samples=7473, method='temperature')  # ("trained_iter_20240220-235255", num_samples=1024)
 #    samples1 = model_manager.load_all_solutions(all=True)
 #    samples2 = model_manager.load_and_filter_all_solutions(all=True)
